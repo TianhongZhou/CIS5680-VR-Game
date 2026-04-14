@@ -97,3 +97,9 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+*.md
+!README.md
+/Assets/Screenshots/
+/Assets/Screenshots.meta
+/Design Doc/VR_Locomotion_Dual_Mode_Plan.md
