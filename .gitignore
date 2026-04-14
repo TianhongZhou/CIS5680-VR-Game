@@ -57,8 +57,38 @@ ehthumbs.db
 Desktop.ini                                                                                                           
 $RECYCLE.BIN/   
 
+<<<<<<< HEAD
 # ===== XR / Addressables cache =====
 [Aa]ssets/AddressableAssetsData/*/*.bin*
 [Aa]ssets/[Ss]treamingAssets/aa.meta                                                                                  
 [Aa]ssets/[Ss]treamingAssets/aa/*
                                                                                                                                 
+=======
+# TestRunner generated files
+InitTestScene*.unity*
+
+# Addressables default ignores, before user customizations
+/ServerData
+/[Aa]ssets/StreamingAssets/aa*
+/[Aa]ssets/AddressableAssetsData/link.xml*
+/[Aa]ssets/Addressables_Temp*
+# By default, Addressables content builds will generate addressables_content_state.bin
+# files in platform-specific subfolders, for example:
+# /Assets/AddressableAssetsData/OSX/addressables_content_state.bin
+/[Aa]ssets/AddressableAssetsData/*/*.bin*
+
+# Visual Scripting auto-generated files
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Flow/UnitOptions.db
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Flow/UnitOptions.db.meta
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers.meta
+
+# Auto-generated scenes by play mode tests
+/[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+*.md
+!README.md
+/Assets/Screenshots/
+/Assets/Screenshots.meta
+/Design Doc/VR_Locomotion_Dual_Mode_Plan.md
+>>>>>>> 0ea93424cdba50eeaeccdae906d0e6a5874bc048
