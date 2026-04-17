@@ -341,6 +341,26 @@ MonoBehaviour:
   m_LightPulseFrequency: 2.2
   m_UseHapticsAmplitude: 0.3
   m_UseHapticsDuration: 0.12
+  m_HoverPromptLocalOffset: {x: 0, y: 1.15, z: 0}
+  m_HoverPromptPanelSize: {x: 720, y: 180}
+  m_HoverPromptCanvasScale: 0.0018
+  m_HoverPromptFontSize: 72
+  m_HoverPromptReadyColor: {r: 0.92, g: 1, b: 0.94, a: 1}
+  m_HoverPromptCooldownColor: {r: 1, g: 0.62, b: 0.24, a: 1}
+  m_HoverPromptOutlineColor: {r: 0, g: 0, b: 0, a: 0.88}
+  m_HoverPromptPanelColor: {r: 0.03, g: 0.04, b: 0.04, a: 0.88}
+  m_HoverPromptPanelBorderColor: {r: 0.86, g: 0.96, b: 0.9, a: 0.92}
+  m_ReadyPromptText: Press Grip to Restore Health
+  m_CooldownPromptFormat: Recharging... {0:0.0}s
+  m_OrbVisualRoot: {fileID: 0}
+  m_CooldownWarningBackgroundColor: {r: 0.12, g: 0.02, b: 0.02, a: 1}
+  m_CooldownWarningPulseColorA: {r: 0.62, g: 0.1, b: 0.08, a: 1}
+  m_CooldownWarningPulseColorB: {r: 1, g: 0.48, b: 0.16, a: 1}
+  m_CooldownWarningFlashFrequency: 3.6
+  m_CooldownWarningFlashEmission: 0.8
+  m_CooldownWarningLightBoost: 0.5
+  m_CooldownOrbPulseScale: 0.12
+  m_ReadyOrbPulseScale: 0.03
 --- !u!1 &4421418266957067562
 GameObject:
   m_ObjectHideFlags: 0
