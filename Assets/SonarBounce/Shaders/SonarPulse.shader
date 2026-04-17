@@ -36,6 +36,8 @@ Shader "SonarBounce/PulseReveal"
 
             float4 _PulseOrigins[MAX_PULSES];
             float4 _PulseNormals[MAX_PULSES];
+            float4 _PulseBoundsCenters[MAX_PULSES];
+            float4 _PulseBoundsExtents[MAX_PULSES];
             float  _PulseIntensities[MAX_PULSES];
             float  _PulseWaveIntensities[MAX_PULSES];
             int    _PulseCount;
@@ -44,6 +46,9 @@ Shader "SonarBounce/PulseReveal"
             float4 _GlowPoints[MAX_GLOWPOINTS];
             float  _GlowIntensities[MAX_GLOWPOINTS];
             int    _GlowCount;
+
+            float4 _PlayerAuraPosition;
+            float4 _PlayerAuraParams;
 
             CBUFFER_START(UnityPerMaterial)
                 float  _GridDensity;
@@ -125,10 +130,48 @@ Shader "SonarBounce/PulseReveal"
                     float3 planarDelta = delta - pulseNormal * planeOffset;
                     float planarDist = length(planarDelta);
 
-                    // Floors spread across the hit plane first; vertical surfaces
-                    // add extra climb distance so walls light only after the pulse reaches them.
-                    float surfaceVerticality = saturate(1.0 - abs(dot(wNorm, pulseNormal)));
-                    float dist = planarDist + abs(planeOffset) * surfaceVerticality;
+                    float dist;
+
+                    if (_PulseBoundsExtents[i].w > 0.5)
+                    {
+                        float3 sourceBoundsCenter = _PulseBoundsCenters[i].xyz;
+                        float3 sourceBoundsExtents = _PulseBoundsExtents[i].xyz;
+                        float3 sourceToPoint = wPos - sourceBoundsCenter;
+
+                        float3 wallBitangent = float3(0.0, 1.0, 0.0);
+                        float3 wallTangent = cross(wallBitangent, pulseNormal);
+                        if (dot(wallTangent, wallTangent) < 0.0001)
+                            wallTangent = float3(1.0, 0.0, 0.0);
+                        wallTangent = normalize(wallTangent);
+
+                        float sameFacingMask = smoothstep(0.55, 0.9, dot(wNorm, pulseNormal));
+
+                        float tangentExtent = dot(abs(wallTangent), sourceBoundsExtents);
+                        float bitangentExtent = dot(abs(wallBitangent), sourceBoundsExtents);
+                        float normalExtent = dot(abs(pulseNormal), sourceBoundsExtents);
+
+                        float tangentCoord = abs(dot(sourceToPoint, wallTangent));
+                        float bitangentCoord = abs(dot(sourceToPoint, wallBitangent));
+                        float normalCoord = abs(dot(sourceToPoint, pulseNormal));
+
+                        float tangentMask = 1.0 - smoothstep(tangentExtent + _BandWidth, tangentExtent + (_BandWidth * 2.0), tangentCoord);
+                        float bitangentMask = 1.0 - smoothstep(bitangentExtent + _BandWidth, bitangentExtent + (_BandWidth * 2.0), bitangentCoord);
+                        float planeMask = 1.0 - smoothstep(normalExtent + 0.02, normalExtent + 0.08, normalCoord);
+
+                        float sourceSurfaceMask = sameFacingMask * tangentMask * bitangentMask * planeMask;
+                        float genericSurfaceDist = length(delta);
+
+                        // Wall-hit pulses get fast propagation only on the impacted wall.
+                        // Everything else still participates, but uses regular 3D travel
+                        // distance so floors and adjacent walls can reveal again.
+                        dist = lerp(genericSurfaceDist, planarDist, sourceSurfaceMask);
+                    }
+                    else
+                    {
+                        float sameFacingSurface = saturate(dot(wNorm, pulseNormal));
+                        float crossSurfacePenalty = 1.0 - sameFacingSurface;
+                        dist = planarDist + abs(planeOffset) * crossSurfacePenalty;
+                    }
                     float radius = _PulseOrigins[i].w;
 
                     float band = 1.0 - saturate(abs(dist - radius) / _BandWidth);
@@ -152,7 +195,16 @@ Shader "SonarBounce/PulseReveal"
                     glow = max(glow, g * _GlowIntensities[j]);
                 }
 
-                float totalReveal = saturate(reveal + glow);
+                float playerAura = 0.0;
+                if (_PlayerAuraPosition.w > 0.001 && _PlayerAuraParams.x > 0.001)
+                {
+                    float auraDist = distance(wPos, _PlayerAuraPosition.xyz);
+                    float auraT = saturate(1.0 - auraDist / _PlayerAuraPosition.w);
+                    auraT = pow(auraT, max(0.01, _PlayerAuraParams.y));
+                    playerAura = auraT * _PlayerAuraParams.x;
+                }
+
+                float totalReveal = saturate(reveal + glow + playerAura);
 
                 float gridMask = ComputeGrid(wPos, wNorm, _GridDensity, _GridLineWidth);
 

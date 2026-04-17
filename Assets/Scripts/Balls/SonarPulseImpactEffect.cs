@@ -21,7 +21,7 @@ namespace CIS5680VRGame.Balls
             if (m_PulseManager == null)
                 return;
 
-            m_PulseManager.SpawnPulse(context.HitPoint, context.HitNormal, m_PulseRadius);
+            m_PulseManager.SpawnPulse(context.HitPoint, context.HitNormal, m_PulseRadius, context.Collision.collider);
         }
     }
 }

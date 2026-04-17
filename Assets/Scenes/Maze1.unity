@@ -4051,8 +4051,8 @@ Transform:
   m_GameObject: {fileID: 546747119}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.25, z: -17.35}
-  m_LocalScale: {x: 35.5, y: 2.5, z: 1}
+  m_LocalPosition: {x: 0, y: 3.125, z: -17.35}
+  m_LocalScale: {x: 35.5, y: 6.25, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1908583948}
@@ -10679,6 +10679,7 @@ GameObject:
   - component: {fileID: 1034851983}
   - component: {fileID: 1034851985}
   - component: {fileID: 1034851986}
+  - component: {fileID: 1034851987}
   m_Layer: 0
   m_Name: PlayerEnergySystem
   m_TagString: Untagged
@@ -10801,6 +10802,27 @@ MonoBehaviour:
   m_MenuLocalOffset: {x: 0, y: -0.05, z: 1.1}
   m_MenuSize: {x: 900, y: 540}
   m_ButtonSize: {x: 240, y: 84}
+--- !u!114 &1034851987
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1034851981}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7ab24af5e0b62874e96d63423f1c795f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EnableAura: 1
+  m_OnlyWhenPulseUnavailable: 0
+  m_PlayerEnergy: {fileID: 1034851982}
+  m_ViewTransform: {fileID: 1871112790}
+  m_LocalOffset: {x: 0, y: -0.55, z: 0.15}
+  m_Radius: 2.25
+  m_Intensity: 0.14
+  m_FalloffPower: 2.5
+  m_PulseAvailabilityEnergyThreshold: 10
 --- !u!1 &1040246656
 GameObject:
   m_ObjectHideFlags: 0
@@ -13760,8 +13782,8 @@ Transform:
   m_GameObject: {fileID: 1351420131}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.25, z: 17.35}
-  m_LocalScale: {x: 35.5, y: 2.5, z: 1}
+  m_LocalPosition: {x: 0, y: 3.125, z: 17.35}
+  m_LocalScale: {x: 35.5, y: 6.25, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1908583948}
@@ -16205,8 +16227,8 @@ Transform:
   m_GameObject: {fileID: 1564445227}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 17.35, y: 1.25, z: 0}
-  m_LocalScale: {x: 1, y: 2.5, z: 35.5}
+  m_LocalPosition: {x: 17.35, y: 3.125, z: 0}
+  m_LocalScale: {x: 1, y: 6.25, z: 35.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1908583948}
@@ -16520,8 +16542,8 @@ Transform:
   m_GameObject: {fileID: 1592910016}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -17.35, y: 1.25, z: 0}
-  m_LocalScale: {x: 1, y: 2.5, z: 35.5}
+  m_LocalPosition: {x: -17.35, y: 3.125, z: 0}
+  m_LocalScale: {x: 1, y: 6.25, z: 35.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1908583948}
@@ -19432,6 +19454,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1847243961}
+  - component: {fileID: 1847243962}
   m_Layer: 0
   m_Name: Maze
   m_TagString: Untagged
@@ -19474,6 +19497,45 @@ Transform:
   - {fileID: 1673283004}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1847243962
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1847243960}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a2663eb00bd3304e84cad44ecdaa1e7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_ShowOverlay: 1
+  m_AutoCollectColliders: 1
+  m_TargetColliders:
+  - {fileID: 1888033109}
+  - {fileID: 889111096}
+  - {fileID: 1049226543}
+  - {fileID: 474773917}
+  - {fileID: 808329195}
+  - {fileID: 655736081}
+  - {fileID: 773949649}
+  - {fileID: 1266476635}
+  - {fileID: 1358494352}
+  - {fileID: 51467675}
+  - {fileID: 1254490040}
+  - {fileID: 857018707}
+  - {fileID: 2140509666}
+  - {fileID: 841971275}
+  - {fileID: 1654878550}
+  - {fileID: 1265690502}
+  - {fileID: 1256252160}
+  - {fileID: 1910781712}
+  - {fileID: 680541533}
+  - {fileID: 1673283005}
+  m_FloorFillColor: {r: 0.24, g: 0.28, b: 0.36, a: 0.18}
+  m_FloorOutlineColor: {r: 0.62, g: 0.72, b: 0.86, a: 0.95}
+  m_WallFillColor: {r: 0.08, g: 0.62, b: 1, a: 0.2}
+  m_WallOutlineColor: {r: 0.38, g: 0.86, b: 1, a: 1}
 --- !u!1 &1863115616
 GameObject:
   m_ObjectHideFlags: 0
@@ -20948,6 +21010,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1908583948}
+  - component: {fileID: 1908583949}
   m_Layer: 0
   m_Name: MazeBoundaryWalls
   m_TagString: Untagged
@@ -20974,6 +21037,29 @@ Transform:
   - {fileID: 1564445228}
   m_Father: {fileID: 1485118940}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1908583949
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1908583947}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a2663eb00bd3304e84cad44ecdaa1e7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_ShowOverlay: 1
+  m_AutoCollectColliders: 1
+  m_TargetColliders:
+  - {fileID: 1351420134}
+  - {fileID: 546747122}
+  - {fileID: 1592910019}
+  - {fileID: 1564445230}
+  m_FloorFillColor: {r: 0.24, g: 0.28, b: 0.36, a: 0.18}
+  m_FloorOutlineColor: {r: 0.62, g: 0.72, b: 0.86, a: 0.95}
+  m_WallFillColor: {r: 0.08, g: 0.62, b: 1, a: 0.2}
+  m_WallOutlineColor: {r: 0.38, g: 0.86, b: 1, a: 1}
 --- !u!1 &1910781710
 GameObject:
   m_ObjectHideFlags: 0

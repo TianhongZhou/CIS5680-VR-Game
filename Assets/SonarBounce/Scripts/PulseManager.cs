@@ -25,6 +25,9 @@ public class PulseManager : MonoBehaviour
         public float maxRadius;
         public float holdTimeRemaining;
         public bool reachedMaxRadius;
+        public Vector3 sourceBoundsCenter;
+        public Vector3 sourceBoundsExtents;
+        public bool constrainToSourceSurface;
     }
 
     struct GlowPoint
@@ -39,6 +42,8 @@ public class PulseManager : MonoBehaviour
 
     Vector4[] pulseOriginsBuf;
     Vector4[] pulseNormalsBuf;
+    Vector4[] pulseBoundsCentersBuf;
+    Vector4[] pulseBoundsExtentsBuf;
     float[] pulseIntensitiesBuf;
     float[] pulseWaveIntensitiesBuf;
     Vector4[] glowPointsBuf;
@@ -51,6 +56,8 @@ public class PulseManager : MonoBehaviour
 
         pulseOriginsBuf     = new Vector4[maxPulses];
         pulseNormalsBuf     = new Vector4[maxPulses];
+        pulseBoundsCentersBuf = new Vector4[maxPulses];
+        pulseBoundsExtentsBuf = new Vector4[maxPulses];
         pulseIntensitiesBuf = new float[maxPulses];
         pulseWaveIntensitiesBuf = new float[maxPulses];
         glowPointsBuf       = new Vector4[maxGlowPoints];
@@ -66,10 +73,15 @@ public class PulseManager : MonoBehaviour
 
     public void SpawnPulse(Vector3 origin, float maxRadius)
     {
-        SpawnPulse(origin, Vector3.up, maxRadius);
+        SpawnPulse(origin, Vector3.up, maxRadius, null);
     }
 
     public void SpawnPulse(Vector3 origin, Vector3 normal, float maxRadius)
+    {
+        SpawnPulse(origin, normal, maxRadius, null);
+    }
+
+    public void SpawnPulse(Vector3 origin, Vector3 normal, float maxRadius, Collider sourceCollider)
     {
         if (activePulses.Count >= maxPulses)
         {
@@ -81,6 +93,19 @@ public class PulseManager : MonoBehaviour
         else
             normal.Normalize();
 
+        Bounds sourceBounds = new Bounds(origin, Vector3.zero);
+        bool constrainToSourceSurface = false;
+
+        if (sourceCollider != null)
+        {
+            sourceBounds = sourceCollider.bounds;
+            sourceBounds.Expand(0.05f);
+
+            // Floor pulses should still be able to climb onto nearby geometry.
+            // Wall-hit pulses are constrained to the impacted wall surface.
+            constrainToSourceSurface = Mathf.Abs(normal.y) < 0.35f;
+        }
+
         activePulses.Add(new Pulse
         {
             origin    = origin,
@@ -90,7 +115,10 @@ public class PulseManager : MonoBehaviour
             waveIntensity = 1f,
             maxRadius = maxRadius,
             holdTimeRemaining = revealHoldDuration,
-            reachedMaxRadius = false
+            reachedMaxRadius = false,
+            sourceBoundsCenter = sourceBounds.center,
+            sourceBoundsExtents = sourceBounds.extents,
+            constrainToSourceSurface = constrainToSourceSurface
         });
     }
 
@@ -184,6 +212,12 @@ public class PulseManager : MonoBehaviour
                 var p = activePulses[i];
                 pulseOriginsBuf[i] = new Vector4(p.origin.x, p.origin.y, p.origin.z, p.radius);
                 pulseNormalsBuf[i] = new Vector4(p.normal.x, p.normal.y, p.normal.z, 0f);
+                pulseBoundsCentersBuf[i] = new Vector4(p.sourceBoundsCenter.x, p.sourceBoundsCenter.y, p.sourceBoundsCenter.z, 0f);
+                pulseBoundsExtentsBuf[i] = new Vector4(
+                    p.sourceBoundsExtents.x,
+                    p.sourceBoundsExtents.y,
+                    p.sourceBoundsExtents.z,
+                    p.constrainToSourceSurface ? 1f : 0f);
                 pulseIntensitiesBuf[i] = p.intensity;
                 pulseWaveIntensitiesBuf[i] = p.waveIntensity;
             }
@@ -191,6 +225,8 @@ public class PulseManager : MonoBehaviour
             {
                 pulseOriginsBuf[i] = Vector4.zero;
                 pulseNormalsBuf[i] = Vector4.zero;
+                pulseBoundsCentersBuf[i] = Vector4.zero;
+                pulseBoundsExtentsBuf[i] = Vector4.zero;
                 pulseIntensitiesBuf[i] = 0f;
                 pulseWaveIntensitiesBuf[i] = 0f;
             }
@@ -198,6 +234,8 @@ public class PulseManager : MonoBehaviour
 
         Shader.SetGlobalVectorArray("_PulseOrigins", pulseOriginsBuf);
         Shader.SetGlobalVectorArray("_PulseNormals", pulseNormalsBuf);
+        Shader.SetGlobalVectorArray("_PulseBoundsCenters", pulseBoundsCentersBuf);
+        Shader.SetGlobalVectorArray("_PulseBoundsExtents", pulseBoundsExtentsBuf);
         Shader.SetGlobalFloatArray("_PulseIntensities", pulseIntensitiesBuf);
         Shader.SetGlobalFloatArray("_PulseWaveIntensities", pulseWaveIntensitiesBuf);
         Shader.SetGlobalInt("_PulseCount", pulseCount);

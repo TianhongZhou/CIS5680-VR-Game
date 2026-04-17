@@ -19,6 +19,7 @@ namespace CIS5680VRGame.Balls
         BallHoverInfoDisplay m_HoverInfoDisplay;
         Coroutine m_PulseRoutine;
         bool m_HasStuck;
+        Collider m_StuckSurfaceCollider;
 
         void Awake()
         {
@@ -49,6 +50,7 @@ namespace CIS5680VRGame.Balls
                 m_PulseManager = FindObjectOfType<PulseManager>();
 
             m_HasStuck = true;
+            m_StuckSurfaceCollider = context.Collision.collider;
             StickToSurface(context);
             m_PulseRoutine = StartCoroutine(EmitPulses());
         }
@@ -122,7 +124,7 @@ namespace CIS5680VRGame.Balls
                 : transform.up.normalized;
 
             Vector3 pulseOrigin = transform.position - surfaceNormal * m_StickSurfaceOffset;
-            m_PulseManager.SpawnPulse(pulseOrigin, surfaceNormal, m_PulseRadius);
+            m_PulseManager.SpawnPulse(pulseOrigin, surfaceNormal, m_PulseRadius, m_StuckSurfaceCollider);
         }
     }
 }
