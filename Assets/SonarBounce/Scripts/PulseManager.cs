@@ -7,6 +7,8 @@ public class PulseManager : MonoBehaviour
 
     [Header("Pulse Settings")]
     public float pulseSpeed = 8f;
+    public float revealHoldDuration = 10f;
+    public float waveFadeDuration = 0.75f;
     public float fadeSpeed = 0.6f;
 
     [Header("Limits")]
@@ -16,9 +18,13 @@ public class PulseManager : MonoBehaviour
     struct Pulse
     {
         public Vector3 origin;
+        public Vector3 normal;
         public float radius;
         public float intensity;
+        public float waveIntensity;
         public float maxRadius;
+        public float holdTimeRemaining;
+        public bool reachedMaxRadius;
     }
 
     struct GlowPoint
@@ -32,7 +38,9 @@ public class PulseManager : MonoBehaviour
     List<GlowPoint> activeGlows = new List<GlowPoint>();
 
     Vector4[] pulseOriginsBuf;
+    Vector4[] pulseNormalsBuf;
     float[] pulseIntensitiesBuf;
+    float[] pulseWaveIntensitiesBuf;
     Vector4[] glowPointsBuf;
     float[] glowIntensitiesBuf;
 
@@ -42,7 +50,9 @@ public class PulseManager : MonoBehaviour
         Instance = this;
 
         pulseOriginsBuf     = new Vector4[maxPulses];
+        pulseNormalsBuf     = new Vector4[maxPulses];
         pulseIntensitiesBuf = new float[maxPulses];
+        pulseWaveIntensitiesBuf = new float[maxPulses];
         glowPointsBuf       = new Vector4[maxGlowPoints];
         glowIntensitiesBuf  = new float[maxGlowPoints];
     }
@@ -56,17 +66,31 @@ public class PulseManager : MonoBehaviour
 
     public void SpawnPulse(Vector3 origin, float maxRadius)
     {
+        SpawnPulse(origin, Vector3.up, maxRadius);
+    }
+
+    public void SpawnPulse(Vector3 origin, Vector3 normal, float maxRadius)
+    {
         if (activePulses.Count >= maxPulses)
         {
             activePulses.RemoveAt(0);
         }
 
+        if (normal.sqrMagnitude < 0.0001f)
+            normal = Vector3.up;
+        else
+            normal.Normalize();
+
         activePulses.Add(new Pulse
         {
             origin    = origin,
+            normal    = normal,
             radius    = 0f,
             intensity = 1f,
-            maxRadius = maxRadius
+            waveIntensity = 1f,
+            maxRadius = maxRadius,
+            holdTimeRemaining = revealHoldDuration,
+            reachedMaxRadius = false
         });
     }
 
@@ -108,11 +132,35 @@ public class PulseManager : MonoBehaviour
         {
             var p = activePulses[i];
 
-            p.radius += pulseSpeed * Time.deltaTime;
+            if (!p.reachedMaxRadius)
+            {
+                p.radius += pulseSpeed * Time.deltaTime;
 
-            p.intensity -= fadeSpeed * Time.deltaTime;
+                if (p.radius >= p.maxRadius)
+                {
+                    p.radius = p.maxRadius;
+                    p.reachedMaxRadius = true;
+                }
+            }
+            else
+            {
+                if (p.waveIntensity > 0f)
+                {
+                    var fadeDuration = Mathf.Max(0.01f, waveFadeDuration);
+                    p.waveIntensity = Mathf.Max(0f, p.waveIntensity - (Time.deltaTime / fadeDuration));
+                }
 
-            if (p.radius > p.maxRadius || p.intensity <= 0f)
+                if (p.holdTimeRemaining > 0f)
+                {
+                    p.holdTimeRemaining -= Time.deltaTime;
+                }
+                else
+                {
+                    p.intensity -= fadeSpeed * Time.deltaTime;
+                }
+            }
+
+            if (p.intensity <= 0f)
             {
                 activePulses.RemoveAt(i);
                 continue;
@@ -135,17 +183,23 @@ public class PulseManager : MonoBehaviour
             {
                 var p = activePulses[i];
                 pulseOriginsBuf[i] = new Vector4(p.origin.x, p.origin.y, p.origin.z, p.radius);
+                pulseNormalsBuf[i] = new Vector4(p.normal.x, p.normal.y, p.normal.z, 0f);
                 pulseIntensitiesBuf[i] = p.intensity;
+                pulseWaveIntensitiesBuf[i] = p.waveIntensity;
             }
             else
             {
                 pulseOriginsBuf[i] = Vector4.zero;
+                pulseNormalsBuf[i] = Vector4.zero;
                 pulseIntensitiesBuf[i] = 0f;
+                pulseWaveIntensitiesBuf[i] = 0f;
             }
         }
 
         Shader.SetGlobalVectorArray("_PulseOrigins", pulseOriginsBuf);
+        Shader.SetGlobalVectorArray("_PulseNormals", pulseNormalsBuf);
         Shader.SetGlobalFloatArray("_PulseIntensities", pulseIntensitiesBuf);
+        Shader.SetGlobalFloatArray("_PulseWaveIntensities", pulseWaveIntensitiesBuf);
         Shader.SetGlobalInt("_PulseCount", pulseCount);
 
         int glowCount = Mathf.Min(activeGlows.Count, maxGlowPoints);

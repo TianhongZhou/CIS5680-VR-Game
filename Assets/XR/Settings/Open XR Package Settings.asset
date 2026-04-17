@@ -837,7 +837,7 @@ MonoBehaviour:
   m_Name: Standalone
   m_EditorClassIdentifier: 
   features:
-  - {fileID: 8221564594354640495}
+  - {fileID: 1443452708213354362}
   - {fileID: -8749980634715080836}
   - {fileID: -1276894210230670667}
   - {fileID: -4478006660784508864}
@@ -850,10 +850,10 @@ MonoBehaviour:
   - {fileID: 1507748248788215057}
   - {fileID: 7413458854745118488}
   - {fileID: 4054846353496584751}
-  - {fileID: 8696673654983134887}
+  - {fileID: -8895518590110429109}
   - {fileID: -4731438336562001402}
-  - {fileID: 2316775424616146661}
-  - {fileID: -5611916350011621528}
+  - {fileID: 4135229692886101830}
+  - {fileID: -7494486358618572369}
   - {fileID: 239522605376452086}
   m_renderMode: 1
   m_autoColorSubmissionMode: 1
@@ -972,9 +972,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: 9c5b5af5107e35a43818d5411328bfc3, type: 3}
   m_Name: DPadInteraction Standalone
-  m_EditorClassIdentifier: Unity.XR.OpenXR:UnityEngine.XR.OpenXR.Features.Interactions:DPadInteraction
+  m_EditorClassIdentifier: 
   m_enabled: 0
   nameUi: D-Pad Binding
   version: 0.0.1
@@ -1649,26 +1649,6 @@ MonoBehaviour:
   extensionStrings:
   - XR_KHR_binding_modification
   - XR_EXT_dpad_binding
---- !u!114 &3125381194089690783
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 96efa89124dda0941802f28ad8249b87, type: 3}
-  m_Name: MockDriver Standalone
-  m_EditorClassIdentifier: 
-  m_enabled: 0
-  nameUi: Mock Driver
-  version: 0.0.1
-  featureIdInternal: com.unity.openxr.feature.mockdriver
-  openxrExtensionStrings: XR_UNITY_mock_driver
-  company: Unity
-  priority: 0
-  required: 0
 --- !u!114 &3335534256868400719
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1881,9 +1861,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: f028123e2efe1d443875bc7609b4a98b, type: 3}
   m_Name: PalmPoseInteraction Standalone
-  m_EditorClassIdentifier: Unity.XR.OpenXR:UnityEngine.XR.OpenXR.Features.Interactions:PalmPoseInteraction
+  m_EditorClassIdentifier: 
   m_enabled: 0
   nameUi: Palm Pose
   version: 0.0.1
@@ -2468,9 +2448,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: b5a1f07dc5afe854f9f12a4194aca3fb, type: 3}
   m_Name: Standalone
-  m_EditorClassIdentifier: Unity.XR.OpenXR:UnityEngine.XR.OpenXR:OpenXRSettings
+  m_EditorClassIdentifier: 
   features:
   - {fileID: 8221564594354640495}
   - {fileID: 9096479736163431129}

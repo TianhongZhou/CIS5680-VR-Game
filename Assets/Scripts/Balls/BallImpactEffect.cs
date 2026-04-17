@@ -5,8 +5,8 @@ namespace CIS5680VRGame.Balls
     public enum BallType
     {
         Teleport = 0,
-        Reserved1 = 1,
-        Reserved2 = 2,
+        Sonar = 1,
+        StickyPulse = 2,
     }
 
     public readonly struct BallImpactContext

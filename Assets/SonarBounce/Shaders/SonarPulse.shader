@@ -5,6 +5,7 @@ Shader "SonarBounce/PulseReveal"
         _GridDensity ("Grid Density", Float) = 2.0
         _GridLineWidth ("Grid Line Width", Range(0.01, 0.15)) = 0.05
         _BandWidth ("Pulse Band Width", Float) = 0.6
+        _RevealFillStrength ("Reveal Fill Strength", Range(0.0, 1.0)) = 0.4
         _PulseColor ("Pulse Color", Color) = (0.0, 0.8, 1.0, 1.0)
         _BgColor ("Background Color", Color) = (0.0, 0.0, 0.0, 1.0)
         _EmissionStrength ("Emission Strength", Float) = 3.0
@@ -34,7 +35,9 @@ Shader "SonarBounce/PulseReveal"
             #define MAX_PULSES 12
 
             float4 _PulseOrigins[MAX_PULSES];
+            float4 _PulseNormals[MAX_PULSES];
             float  _PulseIntensities[MAX_PULSES];
+            float  _PulseWaveIntensities[MAX_PULSES];
             int    _PulseCount;
 
             #define MAX_GLOWPOINTS 8
@@ -46,6 +49,7 @@ Shader "SonarBounce/PulseReveal"
                 float  _GridDensity;
                 float  _GridLineWidth;
                 float  _BandWidth;
+                float  _RevealFillStrength;
                 float4 _PulseColor;
                 float4 _BgColor;
                 float  _EmissionStrength;
@@ -64,6 +68,7 @@ Shader "SonarBounce/PulseReveal"
                 float3 worldPos    : TEXCOORD0;
                 float3 worldNormal : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
+                UNITY_VERTEX_OUTPUT_STEREO
             };
 
             // ============================================================
@@ -71,9 +76,10 @@ Shader "SonarBounce/PulseReveal"
             // ============================================================
             Varyings vert(Attributes IN)
             {
-                Varyings OUT;
+                Varyings OUT = (Varyings)0;
                 UNITY_SETUP_INSTANCE_ID(IN);
                 UNITY_TRANSFER_INSTANCE_ID(IN, OUT);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
 
                 OUT.positionCS  = TransformObjectToHClip(IN.positionOS.xyz);
                 OUT.worldPos    = TransformObjectToWorld(IN.positionOS.xyz);
@@ -100,19 +106,40 @@ Shader "SonarBounce/PulseReveal"
 
             float4 frag(Varyings IN) : SV_Target
             {
+                UNITY_SETUP_INSTANCE_ID(IN);
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
+
                 float3 wPos = IN.worldPos;
                 float3 wNorm = normalize(IN.worldNormal);
 
                 float reveal = 0.0;
                 for (int i = 0; i < _PulseCount; i++)
                 {
-                    float dist = distance(wPos, _PulseOrigins[i].xyz);
+                    float3 pulseNormal = _PulseNormals[i].xyz;
+                    if (dot(pulseNormal, pulseNormal) < 0.0001)
+                        pulseNormal = float3(0.0, 1.0, 0.0);
+                    pulseNormal = normalize(pulseNormal);
+
+                    float3 delta = wPos - _PulseOrigins[i].xyz;
+                    float planeOffset = dot(delta, pulseNormal);
+                    float3 planarDelta = delta - pulseNormal * planeOffset;
+                    float planarDist = length(planarDelta);
+
+                    // Floors spread across the hit plane first; vertical surfaces
+                    // add extra climb distance so walls light only after the pulse reaches them.
+                    float surfaceVerticality = saturate(1.0 - abs(dot(wNorm, pulseNormal)));
+                    float dist = planarDist + abs(planeOffset) * surfaceVerticality;
                     float radius = _PulseOrigins[i].w;
 
                     float band = 1.0 - saturate(abs(dist - radius) / _BandWidth);
                     band = smoothstep(0.0, 1.0, band);
 
-                    reveal = max(reveal, band * _PulseIntensities[i]);
+                    float fill = 1.0 - smoothstep(max(radius - (_BandWidth * 1.5), 0.0), radius, dist);
+                    float waveReveal = band * _PulseWaveIntensities[i] * _PulseIntensities[i];
+                    float fillReveal = fill * _RevealFillStrength * _PulseIntensities[i];
+                    float pulseReveal = max(waveReveal, fillReveal);
+
+                    reveal = max(reveal, pulseReveal);
                 }
 
                 float glow = 0.0;

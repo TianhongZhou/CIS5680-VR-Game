@@ -1053,6 +1053,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   pulseSpeed: 8
+  revealHoldDuration: 10
+  waveFadeDuration: 0.75
   fadeSpeed: 0.6
   maxPulses: 12
   maxGlowPoints: 8

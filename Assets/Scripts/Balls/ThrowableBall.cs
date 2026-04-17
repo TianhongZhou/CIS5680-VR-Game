@@ -1,5 +1,8 @@
-﻿using UnityEngine;
+using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
+using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace CIS5680VRGame.Balls
 {
@@ -10,17 +13,21 @@ namespace CIS5680VRGame.Balls
         [SerializeField] BallImpactEffect m_ImpactEffect;
         [SerializeField] LayerMask m_ValidGroundLayers = ~0;
         [SerializeField] float m_MinGroundUpDot = 0.6f;
+        [SerializeField] bool m_RequireGroundContact = true;
         [SerializeField] bool m_AllowOnlyAfterThrow = true;
         [SerializeField] bool m_DestroyOnImpact = true;
         [SerializeField] float m_DestroyDelay = 0f;
+        [SerializeField] bool m_IgnoreHolsterCollisionsOnThrow = true;
 
         UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable m_GrabInteractable;
+        Collider[] m_Colliders;
         bool m_WasThrown;
         bool m_Consumed;
 
         void Awake()
         {
             m_GrabInteractable = GetComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();
+            m_Colliders = GetComponentsInChildren<Collider>(true);
 
             if (m_ImpactEffect == null)
                 m_ImpactEffect = GetComponent<BallImpactEffect>();
@@ -47,6 +54,9 @@ namespace CIS5680VRGame.Balls
         void OnSelectExited(SelectExitEventArgs _)
         {
             m_WasThrown = true;
+
+            if (m_IgnoreHolsterCollisionsOnThrow)
+                IgnoreHolsterCollisions();
         }
 
         void OnCollisionEnter(Collision collision)
@@ -64,7 +74,7 @@ namespace CIS5680VRGame.Balls
                 return;
 
             ContactPoint contact = collision.GetContact(0);
-            if (Vector3.Dot(contact.normal, Vector3.up) < m_MinGroundUpDot)
+            if (m_RequireGroundContact && Vector3.Dot(contact.normal, Vector3.up) < m_MinGroundUpDot)
                 return;
 
             m_Consumed = true;
@@ -74,6 +84,56 @@ namespace CIS5680VRGame.Balls
 
             if (m_DestroyOnImpact)
                 Destroy(gameObject, m_DestroyDelay);
+        }
+
+        void IgnoreHolsterCollisions()
+        {
+            if (m_Colliders == null || m_Colliders.Length == 0)
+                return;
+
+            var ignoredColliders = new HashSet<Collider>();
+
+            var holsterSlots = FindObjectsOfType<BallHolsterSlot>(true);
+            for (int i = 0; i < holsterSlots.Length; i++)
+            {
+                Collider[] holsterColliders = holsterSlots[i].GetComponentsInChildren<Collider>(true);
+                IgnoreColliders(holsterColliders, ignoredColliders);
+            }
+
+            var sockets = FindObjectsOfType<XRSocketInteractor>(true);
+            for (int i = 0; i < sockets.Length; i++)
+            {
+                foreach (IXRSelectInteractable selectedInteractable in sockets[i].interactablesSelected)
+                {
+                    if (selectedInteractable is not Component selectedComponent)
+                        continue;
+
+                    Collider[] selectedColliders = selectedComponent.GetComponentsInChildren<Collider>(true);
+                    IgnoreColliders(selectedColliders, ignoredColliders);
+                }
+            }
+        }
+
+        void IgnoreColliders(Collider[] targetColliders, HashSet<Collider> ignoredColliders)
+        {
+            if (targetColliders == null)
+                return;
+
+            for (int i = 0; i < targetColliders.Length; i++)
+            {
+                Collider targetCollider = targetColliders[i];
+                if (targetCollider == null || !ignoredColliders.Add(targetCollider))
+                    continue;
+
+                for (int j = 0; j < m_Colliders.Length; j++)
+                {
+                    Collider selfCollider = m_Colliders[j];
+                    if (selfCollider == null || selfCollider == targetCollider)
+                        continue;
+
+                    Physics.IgnoreCollision(selfCollider, targetCollider, true);
+                }
+            }
         }
     }
 }
