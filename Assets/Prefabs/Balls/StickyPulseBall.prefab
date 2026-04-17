@@ -254,7 +254,7 @@ MonoBehaviour:
     m_RotationOrder: 4
   m_ThrowVelocityScale: 0.65
   m_ThrowAngularVelocityScale: 0.85
-  m_ForceGravityOnDetach: 0
+  m_ForceGravityOnDetach: 1
   m_RetainTransformParent: 1
   m_StartingSingleGrabTransformers: []
   m_StartingMultipleGrabTransformers: []

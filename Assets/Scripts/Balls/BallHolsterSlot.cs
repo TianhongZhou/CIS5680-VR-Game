@@ -1,5 +1,6 @@
 using System.Collections;
 using CIS5680VRGame.Gameplay;
+using CIS5680VRGame.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
@@ -163,6 +164,13 @@ namespace CIS5680VRGame.Balls
         {
             if (m_ThrowableBallPrefab == null)
                 return;
+
+            YawOnlyFollow follower = GetComponent<YawOnlyFollow>();
+            if (follower != null)
+            {
+                follower.SnapToTarget();
+                Physics.SyncTransforms();
+            }
 
             Transform spawnTransform = m_SpawnPoint != null ? m_SpawnPoint : transform;
             GameObject spawned = Instantiate(m_ThrowableBallPrefab, spawnTransform.position, spawnTransform.rotation);

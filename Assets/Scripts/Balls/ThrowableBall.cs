@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
@@ -10,6 +11,9 @@ namespace CIS5680VRGame.Balls
     [RequireComponent(typeof(UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable))]
     public class ThrowableBall : MonoBehaviour
     {
+        static readonly MethodInfo s_ResetThrowSmoothingMethod =
+            typeof(UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable).GetMethod("ResetThrowSmoothing", BindingFlags.Instance | BindingFlags.NonPublic);
+
         [SerializeField] BallImpactEffect m_ImpactEffect;
         [SerializeField] LayerMask m_ValidGroundLayers = ~0;
         [SerializeField] float m_MinGroundUpDot = 0.6f;
@@ -20,14 +24,18 @@ namespace CIS5680VRGame.Balls
         [SerializeField] bool m_IgnoreHolsterCollisionsOnThrow = true;
 
         UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable m_GrabInteractable;
+        Rigidbody m_Rigidbody;
         Collider[] m_Colliders;
+        XRBaseInteractable.MovementType m_DefaultMovementType;
         bool m_WasThrown;
         bool m_Consumed;
 
         void Awake()
         {
             m_GrabInteractable = GetComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();
+            m_Rigidbody = GetComponent<Rigidbody>();
             m_Colliders = GetComponentsInChildren<Collider>(true);
+            m_DefaultMovementType = m_GrabInteractable.movementType;
 
             if (m_ImpactEffect == null)
                 m_ImpactEffect = GetComponent<BallImpactEffect>();
@@ -45,14 +53,29 @@ namespace CIS5680VRGame.Balls
             m_GrabInteractable.selectExited.RemoveListener(OnSelectExited);
         }
 
-        void OnSelectEntered(SelectEnterEventArgs _)
+        void OnSelectEntered(SelectEnterEventArgs args)
         {
             m_Consumed = false;
             m_WasThrown = false;
+
+            if (args.interactorObject is XRSocketInteractor)
+            {
+                SetMovementType(XRBaseInteractable.MovementType.Kinematic);
+                ClearHeldMomentum();
+                return;
+            }
+
+            SetMovementType(m_DefaultMovementType);
+
+            if (IsSelectedBySocket(args.interactorObject))
+                ClearHeldMomentum();
         }
 
-        void OnSelectExited(SelectExitEventArgs _)
+        void OnSelectExited(SelectExitEventArgs args)
         {
+            if (m_GrabInteractable.isSelected || args.interactorObject is XRSocketInteractor)
+                return;
+
             m_WasThrown = true;
 
             if (m_IgnoreHolsterCollisionsOnThrow)
@@ -134,6 +157,50 @@ namespace CIS5680VRGame.Balls
                     Physics.IgnoreCollision(selfCollider, targetCollider, true);
                 }
             }
+        }
+
+        bool IsSelectedBySocket(IXRSelectInteractor excludingInteractor)
+        {
+            List<IXRSelectInteractor> interactorsSelecting = m_GrabInteractable.interactorsSelecting;
+            for (int i = 0; i < interactorsSelecting.Count; i++)
+            {
+                IXRSelectInteractor interactor = interactorsSelecting[i];
+                if (ReferenceEquals(interactor, excludingInteractor))
+                    continue;
+
+                if (interactor is XRSocketInteractor)
+                    return true;
+            }
+
+            return false;
+        }
+
+        void SetMovementType(XRBaseInteractable.MovementType movementType)
+        {
+            if (m_GrabInteractable != null && m_GrabInteractable.movementType != movementType)
+                m_GrabInteractable.movementType = movementType;
+        }
+
+        void ClearHeldMomentum()
+        {
+            if (m_Rigidbody != null)
+            {
+                if (m_Rigidbody.isKinematic)
+                {
+                    m_Rigidbody.Sleep();
+                }
+                else
+                {
+#if UNITY_2023_3_OR_NEWER
+                    m_Rigidbody.linearVelocity = Vector3.zero;
+#else
+                    m_Rigidbody.velocity = Vector3.zero;
+#endif
+                    m_Rigidbody.angularVelocity = Vector3.zero;
+                }
+            }
+
+            s_ResetThrowSmoothingMethod?.Invoke(m_GrabInteractable, null);
         }
     }
 }

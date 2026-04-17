@@ -42,12 +42,16 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] int m_SectorShellSegments = 24;
         [SerializeField] float m_ResponseRingDuration = 0.65f;
         [SerializeField] Vector3 m_ResponseRingScaleMultiplier = new(1.7f, 1.7f, 1f);
+        [SerializeField] Vector3 m_GoalHighlightScaleMultiplier = new(1.09f, 1.03f, 1.09f);
+        [SerializeField] float m_GoalHighlightLift = 0.002f;
         [SerializeField] Color m_UnvisitedColor = new(1f, 0.64f, 0.12f, 0.9f);
         [SerializeField] Color m_VisitedColor = new(0.18f, 0.84f, 0.96f, 0.92f);
+        [SerializeField] Color m_GoalColor = new(0.32f, 1f, 0.46f, 0.96f);
+        [SerializeField] Color m_GoalCompletedColor = new(0.22f, 1f, 0.72f, 0.92f);
         [SerializeField] Color m_SectorShellColor = new(0.98f, 0.74f, 0.24f, 0.38f);
 
         readonly List<XRBaseInteractor> m_PlayerInteractors = new();
-        readonly List<StationMarker> m_StationMarkers = new();
+        readonly List<LocatorMarker> m_LocatorMarkers = new();
 
         Material m_HighlightMaterial;
         Material m_SectorShellMaterial;
@@ -61,9 +65,17 @@ namespace CIS5680VRGame.Gameplay
         Mesh m_SectorShellMesh;
         float m_SectorShellStartedAt = -999f;
 
-        sealed class StationMarker
+        enum LocatorMarkerKind
         {
+            RefillStation,
+            Goal,
+        }
+
+        sealed class LocatorMarker
+        {
+            public LocatorMarkerKind Kind;
             public BallRefillStation Station;
+            public LevelGoalTrigger Goal;
             public GameObject RootObject;
             public Transform PadTransform;
             public MeshRenderer PadRenderer;
@@ -71,6 +83,15 @@ namespace CIS5680VRGame.Gameplay
             public MeshRenderer ResponseRenderer;
             public float VisibleFrom;
             public float VisibleUntil;
+            public readonly List<GoalMeshPart> GoalMeshParts = new();
+        }
+
+        sealed class GoalMeshPart
+        {
+            public Transform SourceTransform;
+            public Renderer SourceRenderer;
+            public Transform HighlightTransform;
+            public MeshRenderer HighlightRenderer;
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -96,7 +117,7 @@ namespace CIS5680VRGame.Gameplay
             EnsureHighlightMaterial();
             EnsureSectorShellMaterial();
             EnsureResponseRingMaterial();
-            RefreshStations(forceRebuild: true);
+            RefreshMarkers(forceRebuild: true);
             HideAllMarkers();
             EnsureSectorShellObject();
         }
@@ -113,7 +134,7 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             ResolveReferences();
-            RefreshStations();
+            RefreshMarkers();
             UpdateTriggerState();
             UpdateMarkerVisibility();
         }
@@ -125,10 +146,10 @@ namespace CIS5680VRGame.Gameplay
 
         void CleanupRuntimeObjects()
         {
-            for (int i = 0; i < m_StationMarkers.Count; i++)
-                DestroyMarker(m_StationMarkers[i]);
+            for (int i = 0; i < m_LocatorMarkers.Count; i++)
+                DestroyMarker(m_LocatorMarkers[i]);
 
-            m_StationMarkers.Clear();
+            m_LocatorMarkers.Clear();
 
             if (m_SectorShellObject != null)
             {
@@ -255,15 +276,18 @@ namespace CIS5680VRGame.Gameplay
             m_SectorShellObject = sectorShellObject;
         }
 
-        void RefreshStations(bool forceRebuild = false)
+        void RefreshMarkers(bool forceRebuild = false)
         {
             var stations = FindObjectsOfType<BallRefillStation>(true);
-            if (!forceRebuild && stations.Length == m_StationMarkers.Count)
+            var goals = FindObjectsOfType<LevelGoalTrigger>(true);
+            int targetCount = stations.Length + goals.Length;
+
+            if (!forceRebuild && targetCount == m_LocatorMarkers.Count)
             {
                 bool matches = true;
-                for (int i = 0; i < m_StationMarkers.Count; i++)
+                for (int i = 0; i < m_LocatorMarkers.Count; i++)
                 {
-                    if (m_StationMarkers[i].Station != null)
+                    if (MarkerMatchesSceneObjects(m_LocatorMarkers[i], stations, goals))
                         continue;
 
                     matches = false;
@@ -274,23 +298,96 @@ namespace CIS5680VRGame.Gameplay
                     return;
             }
 
-            for (int i = 0; i < m_StationMarkers.Count; i++)
-                DestroyMarker(m_StationMarkers[i]);
+            for (int i = 0; i < m_LocatorMarkers.Count; i++)
+                DestroyMarker(m_LocatorMarkers[i]);
 
-            m_StationMarkers.Clear();
+            m_LocatorMarkers.Clear();
 
             for (int i = 0; i < stations.Length; i++)
             {
                 if (stations[i] == null)
                     continue;
 
-                m_StationMarkers.Add(CreateMarker(stations[i]));
+                m_LocatorMarkers.Add(CreateStationMarker(stations[i]));
+            }
+
+            for (int i = 0; i < goals.Length; i++)
+            {
+                if (goals[i] == null)
+                    continue;
+
+                m_LocatorMarkers.Add(CreateGoalMarker(goals[i]));
             }
         }
 
-        StationMarker CreateMarker(BallRefillStation station)
+        bool MarkerMatchesSceneObjects(LocatorMarker marker, BallRefillStation[] stations, LevelGoalTrigger[] goals)
         {
-            var markerRoot = new GameObject($"{station.name}_LocatorHighlight");
+            if (marker == null)
+                return false;
+
+            return marker.Kind switch
+            {
+                LocatorMarkerKind.RefillStation => marker.Station != null && System.Array.IndexOf(stations, marker.Station) >= 0,
+                LocatorMarkerKind.Goal => marker.Goal != null && System.Array.IndexOf(goals, marker.Goal) >= 0,
+                _ => false,
+            };
+        }
+
+        LocatorMarker CreateStationMarker(BallRefillStation station)
+        {
+            return CreateMarker(station.name, LocatorMarkerKind.RefillStation, station, null);
+        }
+
+        LocatorMarker CreateGoalMarker(LevelGoalTrigger goal)
+        {
+            var markerRoot = new GameObject($"{goal.name}_LocatorHighlight");
+            markerRoot.hideFlags = HideFlags.DontSave;
+            markerRoot.SetActive(false);
+
+            var marker = new LocatorMarker
+            {
+                Kind = LocatorMarkerKind.Goal,
+                Goal = goal,
+                RootObject = markerRoot,
+                VisibleFrom = 0f,
+                VisibleUntil = 0f,
+            };
+
+            var goalRenderers = goal.GetComponentsInChildren<MeshRenderer>(true);
+            for (int i = 0; i < goalRenderers.Length; i++)
+            {
+                MeshRenderer sourceRenderer = goalRenderers[i];
+                if (sourceRenderer == null)
+                    continue;
+
+                MeshFilter sourceFilter = sourceRenderer.GetComponent<MeshFilter>();
+                if (sourceFilter == null || sourceFilter.sharedMesh == null)
+                    continue;
+
+                Transform highlightTransform = CreateHighlightMesh(
+                    $"{sourceRenderer.name}_GoalHighlight",
+                    markerRoot.transform,
+                    sourceFilter.sharedMesh,
+                    out MeshRenderer highlightRenderer);
+
+                marker.GoalMeshParts.Add(new GoalMeshPart
+                {
+                    SourceTransform = sourceRenderer.transform,
+                    SourceRenderer = sourceRenderer,
+                    HighlightTransform = highlightTransform,
+                    HighlightRenderer = highlightRenderer,
+                });
+            }
+
+            if (marker.GoalMeshParts.Count == 0)
+                return CreateMarker(goal.name, LocatorMarkerKind.Goal, null, goal);
+
+            return marker;
+        }
+
+        LocatorMarker CreateMarker(string markerName, LocatorMarkerKind kind, BallRefillStation station, LevelGoalTrigger goal)
+        {
+            var markerRoot = new GameObject($"{markerName}_LocatorHighlight");
             markerRoot.hideFlags = HideFlags.DontSave;
 
             Mesh cubeMesh = GetPrimitiveMesh(PrimitiveType.Cube);
@@ -303,9 +400,11 @@ namespace CIS5680VRGame.Gameplay
 
             markerRoot.SetActive(false);
 
-            return new StationMarker
+            return new LocatorMarker
             {
+                Kind = kind,
                 Station = station,
+                Goal = goal,
                 RootObject = markerRoot,
                 PadTransform = padTransform,
                 PadRenderer = padRenderer,
@@ -334,7 +433,7 @@ namespace CIS5680VRGame.Gameplay
             return child.transform;
         }
 
-        void DestroyMarker(StationMarker marker)
+        void DestroyMarker(LocatorMarker marker)
         {
             if (marker?.RootObject == null)
                 return;
@@ -347,9 +446,9 @@ namespace CIS5680VRGame.Gameplay
 
         void HideAllMarkers()
         {
-            for (int i = 0; i < m_StationMarkers.Count; i++)
+            for (int i = 0; i < m_LocatorMarkers.Count; i++)
             {
-                StationMarker marker = m_StationMarkers[i];
+                LocatorMarker marker = m_LocatorMarkers[i];
                 marker.VisibleFrom = 0f;
                 marker.VisibleUntil = 0f;
                 if (marker.RootObject != null)
@@ -413,20 +512,21 @@ namespace CIS5680VRGame.Gameplay
             float shellDuration = Mathf.Max(0.05f, m_SectorShellDuration);
             float now = Time.unscaledTime;
 
-            for (int i = 0; i < m_StationMarkers.Count; i++)
+            for (int i = 0; i < m_LocatorMarkers.Count; i++)
             {
-                StationMarker marker = m_StationMarkers[i];
-                if (marker.Station == null)
+                LocatorMarker marker = m_LocatorMarkers[i];
+                Transform markerTransform = GetMarkerTransform(marker);
+                if (markerTransform == null)
                     continue;
 
-                Vector3 stationOffset = marker.Station.transform.position - origin;
-                if (stationOffset.sqrMagnitude > maxDistance * maxDistance)
+                Vector3 markerOffset = markerTransform.position - origin;
+                if (markerOffset.sqrMagnitude > maxDistance * maxDistance)
                     continue;
 
-                if (Vector3.Angle(forward, stationOffset) > maxAngle)
+                if (Vector3.Angle(forward, markerOffset) > maxAngle)
                     continue;
 
-                Vector3 planarOffset = Vector3.ProjectOnPlane(stationOffset, Vector3.up);
+                Vector3 planarOffset = Vector3.ProjectOnPlane(markerOffset, Vector3.up);
                 float delay = planarOffset.magnitude / maxDistance * shellDuration;
                 marker.VisibleFrom = now + delay;
                 marker.VisibleUntil = marker.VisibleFrom + Mathf.Max(0.1f, m_DisplayDuration);
@@ -476,11 +576,11 @@ namespace CIS5680VRGame.Gameplay
 
         void UpdateMarkerVisibility()
         {
-            for (int i = 0; i < m_StationMarkers.Count; i++)
+            for (int i = 0; i < m_LocatorMarkers.Count; i++)
             {
-                StationMarker marker = m_StationMarkers[i];
+                LocatorMarker marker = m_LocatorMarkers[i];
                 float now = Time.unscaledTime;
-                bool shouldShow = marker.Station != null && now >= marker.VisibleFrom && now < marker.VisibleUntil;
+                bool shouldShow = GetMarkerTransform(marker) != null && now >= marker.VisibleFrom && now < marker.VisibleUntil;
 
                 if (!shouldShow)
                 {
@@ -503,32 +603,74 @@ namespace CIS5680VRGame.Gameplay
             UpdateSectorShell();
         }
 
-        void UpdateMarkerTransform(StationMarker marker)
+        void UpdateMarkerTransform(LocatorMarker marker)
         {
-            Transform stationTransform = marker.Station.transform;
-            Vector3 stationScale = stationTransform.lossyScale;
-            Vector3 stationUp = stationTransform.up.sqrMagnitude < 0.0001f ? Vector3.up : stationTransform.up.normalized;
+            if (marker.Kind == LocatorMarkerKind.Goal)
+            {
+                UpdateGoalMarkerTransforms(marker);
+                return;
+            }
 
-            marker.PadTransform.SetPositionAndRotation(stationTransform.position + stationUp * Mathf.Max(0.001f, m_PadLift), stationTransform.rotation);
-            marker.PadTransform.localScale = Vector3.Scale(stationScale, m_PadScaleMultiplier);
+            Transform markerTransform = GetMarkerTransform(marker);
+            if (markerTransform == null)
+                return;
+
+            Vector3 markerScale = markerTransform.lossyScale;
+            Vector3 markerUp = markerTransform.up.sqrMagnitude < 0.0001f ? Vector3.up : markerTransform.up.normalized;
+
+            marker.PadTransform.SetPositionAndRotation(markerTransform.position + markerUp * Mathf.Max(0.001f, m_PadLift), markerTransform.rotation);
+            marker.PadTransform.localScale = Vector3.Scale(markerScale, m_PadScaleMultiplier);
 
             if (marker.ResponseTransform != null)
             {
                 marker.ResponseTransform.SetPositionAndRotation(
-                    stationTransform.position + stationUp * Mathf.Max(0.002f, m_PadLift + 0.01f),
-                    stationTransform.rotation * Quaternion.Euler(90f, 0f, 0f));
-                marker.ResponseTransform.localScale = Vector3.Scale(stationScale, m_ResponseRingScaleMultiplier);
+                    markerTransform.position + markerUp * Mathf.Max(0.002f, m_PadLift + 0.01f),
+                    markerTransform.rotation * Quaternion.Euler(90f, 0f, 0f));
+                marker.ResponseTransform.localScale = Vector3.Scale(markerScale, m_ResponseRingScaleMultiplier);
             }
         }
 
-        void UpdateMarkerVisuals(StationMarker marker)
+        void UpdateGoalMarkerTransforms(LocatorMarker marker)
         {
-            Color targetColor = marker.Station.HasBeenVisited ? m_VisitedColor : m_UnvisitedColor;
+            for (int i = 0; i < marker.GoalMeshParts.Count; i++)
+            {
+                GoalMeshPart meshPart = marker.GoalMeshParts[i];
+                if (meshPart?.SourceTransform == null || meshPart.HighlightTransform == null)
+                    continue;
+
+                Vector3 sourceScale = meshPart.SourceTransform.lossyScale;
+                Vector3 scaledSize = Vector3.Scale(sourceScale, m_GoalHighlightScaleMultiplier);
+                Vector3 sourceUp = meshPart.SourceTransform.up.sqrMagnitude < 0.0001f ? Vector3.up : meshPart.SourceTransform.up.normalized;
+                float sourceHeight = meshPart.SourceRenderer != null ? meshPart.SourceRenderer.bounds.size.y : 0f;
+                float extraHeight = Mathf.Max(0f, sourceHeight * (m_GoalHighlightScaleMultiplier.y - 1f));
+                float lift = extraHeight * 0.5f + Mathf.Max(0f, m_GoalHighlightLift);
+
+                meshPart.HighlightTransform.SetPositionAndRotation(
+                    meshPart.SourceTransform.position + sourceUp * lift,
+                    meshPart.SourceTransform.rotation);
+                meshPart.HighlightTransform.localScale = scaledSize;
+            }
+        }
+
+        void UpdateMarkerVisuals(LocatorMarker marker)
+        {
+            Color targetColor = ResolveMarkerColor(marker);
             float wave = 0.76f + 0.24f * (0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * Mathf.Max(0.01f, m_PulseFrequency) * Mathf.PI * 2f));
             Color animatedColor = Color.Lerp(targetColor, Color.white, 0.12f * wave);
             animatedColor.a = targetColor.a * Mathf.Lerp(0.85f, 1f, wave);
 
-            ApplyMarkerProperties(marker.PadRenderer, animatedColor, wave);
+            if (marker.Kind == LocatorMarkerKind.Goal)
+            {
+                for (int i = 0; i < marker.GoalMeshParts.Count; i++)
+                {
+                    GoalMeshPart meshPart = marker.GoalMeshParts[i];
+                    ApplyMarkerProperties(meshPart?.HighlightRenderer, animatedColor, wave);
+                }
+            }
+            else
+            {
+                ApplyMarkerProperties(marker.PadRenderer, animatedColor, wave);
+            }
 
             UpdateResponseRing(marker, targetColor);
         }
@@ -544,7 +686,7 @@ namespace CIS5680VRGame.Gameplay
             renderer.SetPropertyBlock(m_PropertyBlock);
         }
 
-        void UpdateResponseRing(StationMarker marker, Color baseColor)
+        void UpdateResponseRing(LocatorMarker marker, Color baseColor)
         {
             if (marker.ResponseRenderer == null)
                 return;
@@ -568,6 +710,26 @@ namespace CIS5680VRGame.Gameplay
             m_PropertyBlock.SetFloat(s_ProgressId, progress);
             m_PropertyBlock.SetFloat(s_AlphaId, pulse);
             marker.ResponseRenderer.SetPropertyBlock(m_PropertyBlock);
+        }
+
+        Transform GetMarkerTransform(LocatorMarker marker)
+        {
+            return marker.Kind switch
+            {
+                LocatorMarkerKind.RefillStation => marker.Station != null ? marker.Station.transform : null,
+                LocatorMarkerKind.Goal => marker.Goal != null ? marker.Goal.transform : null,
+                _ => null,
+            };
+        }
+
+        Color ResolveMarkerColor(LocatorMarker marker)
+        {
+            return marker.Kind switch
+            {
+                LocatorMarkerKind.RefillStation => marker.Station != null && marker.Station.HasBeenVisited ? m_VisitedColor : m_UnvisitedColor,
+                LocatorMarkerKind.Goal => marker.Goal != null && marker.Goal.HasCompleted ? m_GoalCompletedColor : m_GoalColor,
+                _ => m_UnvisitedColor,
+            };
         }
 
         void TriggerSectorShell(Vector3 origin, Vector3 forward)

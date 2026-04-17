@@ -2,6 +2,7 @@
 
 namespace CIS5680VRGame.UI
 {
+    [DefaultExecutionOrder(-150)]
     public class YawOnlyFollow : MonoBehaviour
     {
         [SerializeField] Transform m_Head;
@@ -9,7 +10,22 @@ namespace CIS5680VRGame.UI
         [SerializeField] float m_HeightOffset = -0.1f;
         [SerializeField] float m_RightOffset = 0f;
 
+        void Awake()
+        {
+            SnapToTarget();
+        }
+
+        void OnEnable()
+        {
+            SnapToTarget();
+        }
+
         void LateUpdate()
+        {
+            SnapToTarget();
+        }
+
+        public void SnapToTarget()
         {
             if (m_Head == null)
                 return;
