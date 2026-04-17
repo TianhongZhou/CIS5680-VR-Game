@@ -4,6 +4,7 @@ Shader "SonarBounce/PulseReveal"
     {
         _GridDensity ("Grid Density", Float) = 2.0
         _GridLineWidth ("Grid Line Width", Range(0.01, 0.15)) = 0.05
+        _UseMeshGridUv ("Use Mesh Grid UV", Float) = 0.0
         _BandWidth ("Pulse Band Width", Float) = 0.6
         _RevealFillStrength ("Reveal Fill Strength", Range(0.0, 1.0)) = 0.4
         _PulseColor ("Pulse Color", Color) = (0.0, 0.8, 1.0, 1.0)
@@ -53,6 +54,7 @@ Shader "SonarBounce/PulseReveal"
             CBUFFER_START(UnityPerMaterial)
                 float  _GridDensity;
                 float  _GridLineWidth;
+                float  _UseMeshGridUv;
                 float  _BandWidth;
                 float  _RevealFillStrength;
                 float4 _PulseColor;
@@ -64,14 +66,16 @@ Shader "SonarBounce/PulseReveal"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS   : NORMAL;
+                float2 uv         : TEXCOORD0;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
                 float4 positionCS  : SV_POSITION;
-                float3 worldPos    : TEXCOORD0;
-                float3 worldNormal : TEXCOORD1;
+                float2 gridUv      : TEXCOORD0;
+                float3 worldPos    : TEXCOORD1;
+                float3 worldNormal : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -87,24 +91,30 @@ Shader "SonarBounce/PulseReveal"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
 
                 OUT.positionCS  = TransformObjectToHClip(IN.positionOS.xyz);
+                OUT.gridUv      = IN.uv;
                 OUT.worldPos    = TransformObjectToWorld(IN.positionOS.xyz);
                 OUT.worldNormal = TransformObjectToWorldNormal(IN.normalOS);
                 return OUT;
             }
 
-            float ComputeGrid(float3 worldPos, float3 worldNormal, float density, float lineWidth)
+            float2 ComputeWorldGridUv(float3 worldPos, float3 worldNormal)
             {
                 float3 absN = abs(worldNormal);
-                float2 gridUV;
+                float2 gridUv;
 
                 if (absN.y >= absN.x && absN.y >= absN.z)
-                    gridUV = worldPos.xz;  
+                    gridUv = worldPos.xz;
                 else if (absN.x >= absN.z)
-                    gridUV = worldPos.yz;  
+                    gridUv = worldPos.yz;
                 else
-                    gridUV = worldPos.xy;  
+                    gridUv = worldPos.xy;
 
-                float2 grid = abs(frac(gridUV * density) - 0.5);
+                return gridUv;
+            }
+
+            float ComputeGrid(float2 gridUv, float density, float lineWidth)
+            {
+                float2 grid = abs(frac(gridUv * density) - 0.5);
                 float lineMask = step(min(grid.x, grid.y), lineWidth);
                 return lineMask;
             }
@@ -169,7 +179,15 @@ Shader "SonarBounce/PulseReveal"
                     else
                     {
                         float sameFacingSurface = saturate(dot(wNorm, pulseNormal));
-                        float crossSurfacePenalty = 1.0 - sameFacingSurface;
+
+                        // Only surfaces that are both similarly oriented and still
+                        // close to the source plane get the "free" planar spread.
+                        // This prevents elevated horizontal caps (like wall tops)
+                        // from lighting as a thin bright strip when the pulse edge
+                        // reaches the wall below.
+                        float samePlaneSurface = 1.0 - smoothstep(0.03, 0.18, abs(planeOffset));
+                        float fastPlanarSpread = sameFacingSurface * samePlaneSurface;
+                        float crossSurfacePenalty = 1.0 - fastPlanarSpread;
                         dist = planarDist + abs(planeOffset) * crossSurfacePenalty;
                     }
                     float radius = _PulseOrigins[i].w;
@@ -206,7 +224,8 @@ Shader "SonarBounce/PulseReveal"
 
                 float totalReveal = saturate(reveal + glow + playerAura);
 
-                float gridMask = ComputeGrid(wPos, wNorm, _GridDensity, _GridLineWidth);
+                float2 gridUv = _UseMeshGridUv > 0.5 ? IN.gridUv : ComputeWorldGridUv(wPos, wNorm);
+                float gridMask = ComputeGrid(gridUv, _GridDensity, _GridLineWidth);
 
                 float fillFactor = 0.08; 
                 float brightness = lerp(fillFactor, 1.0, gridMask);

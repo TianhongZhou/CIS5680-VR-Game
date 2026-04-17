@@ -17,11 +17,23 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] PlayerHealth m_PlayerHealth;
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] MovementModeManager m_MovementModeManager;
-        [SerializeField] float m_DamageFlashDuration = 0.45f;
-        [SerializeField] float m_DamageFlashFalloff = 2.3f;
-        [SerializeField] float m_MaxVignetteIntensity = 0.42f;
+        [SerializeField] Camera m_FeedbackCamera;
+        [SerializeField] float m_DamageFlashDuration = 0.62f;
+        [SerializeField] float m_DamageFlashFalloff = 1.8f;
+        [SerializeField] float m_MaxVignetteIntensity = 0.58f;
         [SerializeField] float m_VignetteSmoothness = 0.72f;
-        [SerializeField] Color m_VignetteColor = new(0.9f, 0.08f, 0.08f, 1f);
+        [SerializeField] Color m_VignetteColor = new(0.96f, 0.08f, 0.1f, 1f);
+        [SerializeField] Color m_DamageTintColor = new(0.96f, 0.4f, 0.43f, 1f);
+        [SerializeField, Range(0f, 1f)] float m_MaxTintBlend = 0.62f;
+        [SerializeField, Range(0f, 2f)] float m_MaxExposureDrop = 0.3f;
+        [SerializeField, Range(0f, 100f)] float m_MaxSaturationLoss = 55f;
+        [SerializeField, Range(0f, 100f)] float m_MaxContrastBoost = 20f;
+        [SerializeField] Color m_OverlayFlashColor = new(0.98f, 0.14f, 0.14f, 1f);
+        [SerializeField, Range(0f, 1f)] float m_MaxOverlayAlpha = 0.2f;
+        [SerializeField] float m_OverlayPulseFrequency = 14f;
+        [SerializeField] float m_OverlayShakePixels = 16f;
+        [SerializeField] float m_OverlayShakeRotation = 0.75f;
+        [SerializeField] float m_OverlayScalePunch = 0.022f;
         [SerializeField] float m_DamageHapticsAmplitude = 0.32f;
         [SerializeField] float m_DamageHapticsDuration = 0.1f;
         [SerializeField] float m_DamageHapticsCooldown = 0.18f;
@@ -32,6 +44,10 @@ namespace CIS5680VRGame.Gameplay
         Volume m_DamageVolume;
         VolumeProfile m_DamageProfile;
         Vignette m_DamageVignette;
+        ColorAdjustments m_DamageColorAdjustments;
+        GameObject m_DamageOverlayRoot;
+        RectTransform m_DamageOverlayRect;
+        Image m_DamageOverlayImage;
         GameObject m_MenuRoot;
         float m_DamageFlashStrength;
         float m_LastDamageHapticsTime = -999f;
@@ -39,6 +55,8 @@ namespace CIS5680VRGame.Gameplay
         void Awake()
         {
             ResolveReferences();
+            EnsureFeedbackCameraPostProcessing();
+            EnsureDamageOverlay();
             EnsureDamageVolume();
         }
 
@@ -46,6 +64,8 @@ namespace CIS5680VRGame.Gameplay
         {
             ResolveReferences();
             Subscribe();
+            EnsureFeedbackCameraPostProcessing();
+            EnsureDamageOverlay();
             EnsureDamageVolume();
             ApplyDamageFlash(0f);
         }
@@ -58,6 +78,8 @@ namespace CIS5680VRGame.Gameplay
         void Update()
         {
             ResolveReferences();
+            EnsureFeedbackCameraPostProcessing();
+            EnsureDamageOverlay();
             EnsureDamageVolume();
 
             if (m_DamageFlashStrength > 0f)
@@ -96,6 +118,14 @@ namespace CIS5680VRGame.Gameplay
                 else
                     DestroyImmediate(m_DamageVolume.gameObject);
             }
+
+            if (m_DamageOverlayRoot != null)
+            {
+                if (Application.isPlaying)
+                    Destroy(m_DamageOverlayRoot);
+                else
+                    DestroyImmediate(m_DamageOverlayRoot);
+            }
         }
 
         void ResolveReferences()
@@ -108,6 +138,14 @@ namespace CIS5680VRGame.Gameplay
 
             if (m_MovementModeManager == null)
                 m_MovementModeManager = FindObjectOfType<MovementModeManager>();
+
+            if (m_FeedbackCamera == null)
+            {
+                if (m_PlayerRig != null && m_PlayerRig.Camera != null)
+                    m_FeedbackCamera = m_PlayerRig.Camera;
+                else
+                    m_FeedbackCamera = Camera.main;
+            }
         }
 
         void Subscribe()
@@ -133,8 +171,8 @@ namespace CIS5680VRGame.Gameplay
             if (context.Reason != HealthChangeReason.Damage || context.Delta >= 0)
                 return;
 
-            float normalizedDamage = Mathf.Clamp01(Mathf.Abs(context.Delta) / 12f);
-            m_DamageFlashStrength = Mathf.Max(m_DamageFlashStrength, 0.42f + normalizedDamage * 0.58f);
+            float normalizedDamage = Mathf.Clamp01(Mathf.Abs(context.Delta) / 10f);
+            m_DamageFlashStrength = Mathf.Max(m_DamageFlashStrength, 0.72f + normalizedDamage * 0.28f);
             TriggerDamageHaptics(normalizedDamage);
         }
 
@@ -176,12 +214,13 @@ namespace CIS5680VRGame.Gameplay
 
         void EnsureDamageVolume()
         {
-            if (m_DamageVolume != null && m_DamageVignette != null)
+            if (m_DamageVolume != null && m_DamageVignette != null && m_DamageColorAdjustments != null)
                 return;
 
             var volumeObject = new GameObject("PlayerDamageVolume");
             volumeObject.hideFlags = HideFlags.DontSave;
             volumeObject.transform.SetParent(transform, false);
+            volumeObject.layer = 0;
 
             m_DamageVolume = volumeObject.AddComponent<Volume>();
             m_DamageVolume.isGlobal = true;
@@ -192,6 +231,7 @@ namespace CIS5680VRGame.Gameplay
             m_DamageProfile.hideFlags = HideFlags.DontSave;
             m_DamageVolume.profile = m_DamageProfile;
             m_DamageVignette = m_DamageProfile.Add<Vignette>(true);
+            m_DamageColorAdjustments = m_DamageProfile.Add<ColorAdjustments>(true);
 
             m_DamageVignette.active = true;
             m_DamageVignette.color.overrideState = true;
@@ -202,6 +242,64 @@ namespace CIS5680VRGame.Gameplay
             m_DamageVignette.smoothness.value = m_VignetteSmoothness;
             m_DamageVignette.rounded.overrideState = true;
             m_DamageVignette.rounded.value = false;
+
+            m_DamageColorAdjustments.active = true;
+            m_DamageColorAdjustments.colorFilter.overrideState = true;
+            m_DamageColorAdjustments.colorFilter.value = Color.white;
+            m_DamageColorAdjustments.postExposure.overrideState = true;
+            m_DamageColorAdjustments.postExposure.value = 0f;
+            m_DamageColorAdjustments.saturation.overrideState = true;
+            m_DamageColorAdjustments.saturation.value = 0f;
+            m_DamageColorAdjustments.contrast.overrideState = true;
+            m_DamageColorAdjustments.contrast.value = 0f;
+        }
+
+        void EnsureDamageOverlay()
+        {
+            if (m_DamageOverlayRoot != null && m_DamageOverlayRect != null && m_DamageOverlayImage != null)
+                return;
+
+            if (m_FeedbackCamera == null)
+                return;
+
+            m_DamageOverlayRoot = new GameObject("PlayerDamageOverlay");
+            m_DamageOverlayRoot.hideFlags = HideFlags.DontSave;
+
+            Canvas canvas = m_DamageOverlayRoot.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = m_FeedbackCamera;
+            canvas.planeDistance = Mathf.Max(m_FeedbackCamera.nearClipPlane + 0.18f, 0.32f);
+            canvas.sortingOrder = 4500;
+
+            CanvasScaler scaler = m_DamageOverlayRoot.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1600f, 900f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+
+            GameObject flashObject = ModalMenuPauseUtility.CreateUIObject("Flash", m_DamageOverlayRoot.transform);
+            m_DamageOverlayRect = flashObject.GetComponent<RectTransform>();
+            m_DamageOverlayRect.anchorMin = Vector2.zero;
+            m_DamageOverlayRect.anchorMax = Vector2.one;
+            m_DamageOverlayRect.offsetMin = new Vector2(-220f, -220f);
+            m_DamageOverlayRect.offsetMax = new Vector2(220f, 220f);
+            m_DamageOverlayRect.anchoredPosition = Vector2.zero;
+            m_DamageOverlayRect.localRotation = Quaternion.identity;
+            m_DamageOverlayRect.localScale = Vector3.one;
+
+            m_DamageOverlayImage = flashObject.AddComponent<Image>();
+            m_DamageOverlayImage.raycastTarget = false;
+            m_DamageOverlayImage.color = new Color(m_OverlayFlashColor.r, m_OverlayFlashColor.g, m_OverlayFlashColor.b, 0f);
+        }
+
+        void EnsureFeedbackCameraPostProcessing()
+        {
+            if (m_FeedbackCamera == null)
+                return;
+
+            UniversalAdditionalCameraData cameraData = m_FeedbackCamera.GetUniversalAdditionalCameraData();
+            if (cameraData != null && !cameraData.renderPostProcessing)
+                cameraData.renderPostProcessing = true;
         }
 
         void ApplyDamageFlash(float normalizedStrength)
@@ -209,9 +307,50 @@ namespace CIS5680VRGame.Gameplay
             if (m_DamageVignette == null)
                 return;
 
-            m_DamageVignette.intensity.value = Mathf.Clamp01(normalizedStrength) * Mathf.Clamp01(m_MaxVignetteIntensity);
+            normalizedStrength = Mathf.Clamp01(normalizedStrength);
+
+            m_DamageVignette.intensity.value = normalizedStrength * Mathf.Clamp01(m_MaxVignetteIntensity);
             m_DamageVignette.smoothness.value = Mathf.Clamp(m_VignetteSmoothness, 0f, 1f);
             m_DamageVignette.color.value = m_VignetteColor;
+
+            if (m_DamageColorAdjustments == null)
+                return;
+
+            float tintBlend = normalizedStrength * Mathf.Clamp01(m_MaxTintBlend);
+            m_DamageColorAdjustments.colorFilter.value = Color.Lerp(Color.white, m_DamageTintColor, tintBlend);
+            m_DamageColorAdjustments.postExposure.value = -normalizedStrength * Mathf.Max(0f, m_MaxExposureDrop);
+            m_DamageColorAdjustments.saturation.value = -normalizedStrength * Mathf.Max(0f, m_MaxSaturationLoss);
+            m_DamageColorAdjustments.contrast.value = normalizedStrength * Mathf.Max(0f, m_MaxContrastBoost);
+
+            ApplyDamageOverlay(normalizedStrength);
+        }
+
+        void ApplyDamageOverlay(float normalizedStrength)
+        {
+            if (m_DamageOverlayImage == null || m_DamageOverlayRect == null)
+                return;
+
+            if (normalizedStrength <= 0.0001f)
+            {
+                m_DamageOverlayImage.color = new Color(m_OverlayFlashColor.r, m_OverlayFlashColor.g, m_OverlayFlashColor.b, 0f);
+                m_DamageOverlayRect.anchoredPosition = Vector2.zero;
+                m_DamageOverlayRect.localRotation = Quaternion.identity;
+                m_DamageOverlayRect.localScale = Vector3.one;
+                return;
+            }
+
+            float pulse = 0.82f + 0.18f * Mathf.Sin(Time.unscaledTime * Mathf.Max(0.01f, m_OverlayPulseFrequency) * Mathf.PI * 2f);
+            float alpha = normalizedStrength * Mathf.Clamp01(m_MaxOverlayAlpha) * pulse;
+            m_DamageOverlayImage.color = new Color(m_OverlayFlashColor.r, m_OverlayFlashColor.g, m_OverlayFlashColor.b, alpha);
+
+            float shakeStrength = normalizedStrength * normalizedStrength;
+            float noiseX = (Mathf.PerlinNoise(Time.unscaledTime * 21f, 0.17f) - 0.5f) * 2f;
+            float noiseY = (Mathf.PerlinNoise(0.83f, Time.unscaledTime * 25f) - 0.5f) * 2f;
+            float roll = (Mathf.PerlinNoise(Time.unscaledTime * 19f, 1.37f) - 0.5f) * 2f;
+
+            m_DamageOverlayRect.anchoredPosition = new Vector2(noiseX, noiseY) * (m_OverlayShakePixels * shakeStrength);
+            m_DamageOverlayRect.localRotation = Quaternion.Euler(0f, 0f, roll * m_OverlayShakeRotation * shakeStrength);
+            m_DamageOverlayRect.localScale = Vector3.one * (1f + m_OverlayScalePunch * normalizedStrength);
         }
 
         void ShowFailureMenu()

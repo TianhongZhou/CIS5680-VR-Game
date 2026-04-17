@@ -14,16 +14,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_ShaderContainers:
   - material: {fileID: 2100000, guid: 99685157b02e4d446bbecb015645e5e8, type: 2}
-    useSRPShaderName: 1
+    useSRPShaderName: 0
     scriptableRenderPipelineShaderName: Universal Render Pipeline/Lit
-    scriptableRenderPipelineShader: {fileID: 0}
+    scriptableRenderPipelineShader: {fileID: 4800000, guid: 3a00b9123f8a4834aeb178dc0c2fb4cf, type: 3}
     useBuiltinShaderName: 1
     builtInPipelineShaderName: Standard
     builtInPipelineShader: {fileID: 0}
   - material: {fileID: 2100000, guid: 9f12d299d16099343a3c5c0d7285822a, type: 2}
-    useSRPShaderName: 1
+    useSRPShaderName: 0
     scriptableRenderPipelineShaderName: Universal Render Pipeline/Lit
-    scriptableRenderPipelineShader: {fileID: 0}
+    scriptableRenderPipelineShader: {fileID: 4800000, guid: 3a00b9123f8a4834aeb178dc0c2fb4cf, type: 3}
     useBuiltinShaderName: 1
     builtInPipelineShaderName: Standard
     builtInPipelineShader: {fileID: 0}
