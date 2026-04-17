@@ -356,7 +356,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6598815579406187037, guid: 18ddb545287c546e19cc77dc9fbb2189, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -1109,6 +1109,7 @@ MonoBehaviour:
   m_StartingEnergy: 80
   m_RegenAmount: 1
   m_RegenInterval: 3
+  m_RefillDuration: 0.6
   m_InsufficientSignalCooldown: 0.2
 --- !u!114 &910000103
 MonoBehaviour:
@@ -1132,11 +1133,18 @@ MonoBehaviour:
   m_ResetThreshold: 0.2
   m_MaxHorizontalMagnitude: 0.55
   m_PadScaleMultiplier: {x: 1.18, y: 1.6, z: 1.18}
-  m_BeaconHeight: 0.9
-  m_BeaconRadius: 0.085
+  m_PadLift: 0.02
   m_PulseFrequency: 2.4
+  m_SectorShellDuration: 0.7
+  m_SectorShellHeight: 1.25
+  m_SectorShellThickness: 0.95
+  m_SectorShellFloorOffset: 0.03
+  m_SectorShellSegments: 24
+  m_ResponseRingDuration: 0.65
+  m_ResponseRingScaleMultiplier: {x: 1.7, y: 1.7, z: 1}
   m_UnvisitedColor: {r: 1, g: 0.64, b: 0.12, a: 0.9}
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 0.92}
+  m_SectorShellColor: {r: 0.98, g: 0.74, b: 0.24, a: 0.38}
 --- !u!1 &910000110
 GameObject:
   m_ObjectHideFlags: 0
@@ -1238,9 +1246,20 @@ MonoBehaviour:
   m_Renderer: {fileID: 910000113}
   m_NormalFillColor: {r: 1, g: 0.55, b: 0, a: 0.95}
   m_NormalBackgroundColor: {r: 0.12, g: 0.12, b: 0.12, a: 0.45}
-  m_WarningFillColor: {r: 1, g: 0.18, b: 0.18, a: 0.98}
-  m_WarningBackgroundColor: {r: 0.3, g: 0.05, b: 0.05, a: 0.55}
   m_WarningFlashDuration: 0.35
+  m_InsufficientFlashColorA: {r: 1, g: 0.55, b: 0, a: 0.95}
+  m_InsufficientFlashColorB: {r: 1, g: 0.92, b: 0.48, a: 1}
+  m_InsufficientBackgroundColor: {r: 0.2, g: 0.14, b: 0.04, a: 0.58}
+  m_InsufficientFlashFrequency: 11
+  m_RefillFlashColorA: {r: 0.25, g: 1, b: 0.42, a: 0.98}
+  m_RefillFlashColorB: {r: 0.62, g: 1, b: 0.62, a: 0.98}
+  m_RefillBackgroundColor: {r: 0.08, g: 0.22, b: 0.08, a: 0.58}
+  m_RefillFlashFrequency: 8
+  m_ConsumeSmoothTime: 0.12
+  m_RegenSmoothTime: 0.22
+  m_RefillAnimationDuration: 0.6
+  m_RefillHapticsAmplitude: 0.18
+  m_RefillHapticsDuration: 0.12
 --- !u!114 &910000115
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1258,6 +1277,9 @@ MonoBehaviour:
   m_LocalOffset: {x: 0.02, y: 0, z: -0.05}
   m_RotationMode: 1
   m_TargetRotationOffsetEuler: {x: 90, y: 90, z: 0}
+  m_ShakeAmplitude: {x: 0.006, y: 0.004, z: 0}
+  m_ShakeDuration: 0.18
+  m_ShakeFrequency: 22
 --- !u!134 &940595630
 PhysicMaterial:
   m_ObjectHideFlags: 0

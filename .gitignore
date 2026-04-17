@@ -88,3 +88,7 @@ InitTestScene*.unity*
 
 # Design documents (keep local only)
 Design Doc/
+
+# Unity Version Control / Plastic (team uses Git)
+/.plastic/
+/ignore.conf
