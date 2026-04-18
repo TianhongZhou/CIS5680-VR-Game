@@ -40,6 +40,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Vector3 m_MenuLocalOffset = new(0f, -0.05f, 1.1f);
         [SerializeField] Vector2 m_MenuSize = new(900f, 540f);
         [SerializeField] Vector2 m_ButtonSize = new(240f, 84f);
+        [SerializeField] string m_MainMenuSceneName = "MainMenu";
 
         Volume m_DamageVolume;
         VolumeProfile m_DamageProfile;
@@ -434,12 +435,23 @@ namespace CIS5680VRGame.Gameplay
                 RestartLevel);
 
             CreateButton(
+                "MainMenuButton",
+                buttonRow.transform,
+                "Return to Main Menu",
+                fontAsset,
+                new Color(0.18f, 0.1f, 0.12f, 0.94f),
+                ReturnToMainMenu,
+                22f);
+
+            CreateButton(
                 "QuitButton",
                 buttonRow.transform,
                 "Quit",
                 fontAsset,
                 new Color(0.2f, 0.12f, 0.14f, 0.94f),
                 QuitApplication);
+
+            ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
         }
 
         GameObject CreateUIObject(string name, Transform parent)
@@ -476,7 +488,8 @@ namespace CIS5680VRGame.Gameplay
             string label,
             TMP_FontAsset fontAsset,
             Color backgroundColor,
-            UnityEngine.Events.UnityAction onClick)
+            UnityEngine.Events.UnityAction onClick,
+            float fontSize = 30f)
         {
             GameObject buttonObject = CreateUIObject(name, parent);
             RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
@@ -510,7 +523,7 @@ namespace CIS5680VRGame.Gameplay
             TextMeshProUGUI buttonLabel = textObject.AddComponent<TextMeshProUGUI>();
             buttonLabel.font = fontAsset;
             buttonLabel.text = label;
-            buttonLabel.fontSize = 30f;
+            buttonLabel.fontSize = fontSize;
             buttonLabel.fontStyle = FontStyles.Bold;
             buttonLabel.color = Color.white;
             buttonLabel.alignment = TextAlignmentOptions.Center;
@@ -522,6 +535,12 @@ namespace CIS5680VRGame.Gameplay
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
             Scene activeScene = SceneManager.GetActiveScene();
             SceneManager.LoadScene(activeScene.name);
+        }
+
+        void ReturnToMainMenu()
+        {
+            ModalMenuPauseUtility.ResumeGameplayAfterMenu();
+            SceneManager.LoadScene(m_MainMenuSceneName);
         }
 
         void QuitApplication()

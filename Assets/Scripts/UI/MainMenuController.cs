@@ -1,0 +1,537 @@
+using CIS5680VRGame.Gameplay;
+using TMPro;
+using Unity.XR.CoreUtils;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
+namespace CIS5680VRGame.UI
+{
+    public class MainMenuController : MonoBehaviour
+    {
+        [SerializeField] string m_GameplaySceneName = "Maze1";
+        [SerializeField] string m_TutorialSceneName = "TutorialLevel";
+        [SerializeField] XROrigin m_PlayerRig;
+        [SerializeField] string m_Title = "SONAR BOUNCE";
+        [SerializeField] Vector2 m_MenuSize = new(620f, 460f);
+        [SerializeField] Vector2 m_ButtonSize = new(320f, 84f);
+        [SerializeField] Vector2 m_TutorialPromptSize = new(540f, 360f);
+        [SerializeField] Vector2 m_TutorialChoiceButtonSize = new(196f, 60f);
+        [SerializeField] Vector2 m_TutorialCancelButtonSize = new(240f, 56f);
+        [SerializeField] float m_TutorialChoiceButtonFontSize = 26f;
+        [SerializeField] float m_TutorialCancelButtonFontSize = 24f;
+        [SerializeField] Vector2 m_PanelAnchor = new(0.34f, 0.52f);
+        [SerializeField] Vector2 m_PanelOffset = Vector2.zero;
+        [SerializeField] float m_CanvasPlaneDistance = 1.05f;
+
+        GameObject m_MenuRoot;
+        GameObject m_ButtonColumn;
+        GameObject m_TutorialPromptOverlay;
+
+        void Reset()
+        {
+            ResolvePlayerRig();
+        }
+
+        void Awake()
+        {
+            ResolvePlayerRig();
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+            TryReuseExistingMenuRoot();
+            CreateMenuIfNeeded();
+        }
+
+        void OnDestroy()
+        {
+            if (m_MenuRoot == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(m_MenuRoot);
+            else
+                DestroyImmediate(m_MenuRoot);
+        }
+
+        void ResolvePlayerRig()
+        {
+            if (m_PlayerRig == null)
+                m_PlayerRig = FindObjectOfType<XROrigin>();
+        }
+
+        void CreateMenuIfNeeded()
+        {
+            Camera menuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
+            if (menuCamera == null)
+                return;
+
+            bool createdNewRoot = m_MenuRoot == null;
+            RectTransform panelRect;
+            if (createdNewRoot)
+            {
+                m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
+                    "MainMenuCanvas",
+                    menuCamera,
+                    m_MenuSize,
+                    new Color(0f, 0f, 0f, 0.18f),
+                    out panelRect);
+            }
+            else
+            {
+                m_MenuRoot.SetActive(true);
+                panelRect = ResolvePanelRect();
+            }
+
+            ConfigureMenuCanvas(menuCamera);
+            ConfigurePanelTransform(panelRect);
+            ResolveMenuSections();
+
+            if (!createdNewRoot && MenuRootNeedsRefresh())
+            {
+                DestroyMenuRoot();
+                CreateMenuIfNeeded();
+                return;
+            }
+
+            if (!createdNewRoot)
+            {
+                SetTutorialPromptVisible(false);
+                return;
+            }
+
+            GameObject panel = panelRect.gameObject;
+            Image panelImage = panel.AddComponent<Image>();
+            panelImage.color = new Color(0.035f, 0.055f, 0.08f, 0.8f);
+
+            VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(52, 52, 46, 46);
+            layout.spacing = 20f;
+            layout.childAlignment = TextAnchor.MiddleCenter;
+            layout.childControlHeight = false;
+            layout.childControlWidth = true;
+            layout.childForceExpandHeight = false;
+            layout.childForceExpandWidth = true;
+
+            ContentSizeFitter fitter = panel.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+            TMP_FontAsset fontAsset = ModalMenuPauseUtility.ResolveFontAsset();
+
+            CreateLabel(
+                "Title",
+                panel.transform,
+                m_Title,
+                fontAsset,
+                74f,
+                FontStyles.Bold,
+                new Color(0.92f, 0.98f, 1f, 1f),
+                104f,
+                false,
+                true);
+
+            GameObject spacer = ModalMenuPauseUtility.CreateUIObject("Spacer", panel.transform);
+            RectTransform spacerRect = spacer.GetComponent<RectTransform>();
+            spacerRect.sizeDelta = new Vector2(0f, 10f);
+            LayoutElement spacerLayout = spacer.AddComponent<LayoutElement>();
+            spacerLayout.preferredHeight = 10f;
+
+            GameObject contentArea = ModalMenuPauseUtility.CreateUIObject("ContentArea", panel.transform);
+            RectTransform contentAreaRect = contentArea.GetComponent<RectTransform>();
+            contentAreaRect.anchorMin = new Vector2(0f, 0f);
+            contentAreaRect.anchorMax = new Vector2(1f, 1f);
+            contentAreaRect.offsetMin = Vector2.zero;
+            contentAreaRect.offsetMax = Vector2.zero;
+
+            LayoutElement contentAreaLayout = contentArea.AddComponent<LayoutElement>();
+            float contentAreaHeight = Mathf.Max(m_ButtonSize.y * 2f + 60f, m_MenuSize.y - 210f);
+            contentAreaRect.sizeDelta = new Vector2(0f, contentAreaHeight);
+            contentAreaLayout.preferredHeight = contentAreaHeight;
+            contentAreaLayout.flexibleHeight = 1f;
+
+            m_ButtonColumn = ModalMenuPauseUtility.CreateUIObject("Buttons", contentArea.transform);
+            RectTransform buttonColumnRect = m_ButtonColumn.GetComponent<RectTransform>();
+            buttonColumnRect.anchorMin = new Vector2(0.5f, 0.5f);
+            buttonColumnRect.anchorMax = new Vector2(0.5f, 0.5f);
+            buttonColumnRect.pivot = new Vector2(0.5f, 0.5f);
+            buttonColumnRect.anchoredPosition = Vector2.zero;
+            buttonColumnRect.sizeDelta = Vector2.zero;
+
+            VerticalLayoutGroup buttonLayout = m_ButtonColumn.AddComponent<VerticalLayoutGroup>();
+            buttonLayout.spacing = 18f;
+            buttonLayout.childAlignment = TextAnchor.MiddleCenter;
+            buttonLayout.childControlWidth = true;
+            buttonLayout.childControlHeight = true;
+            buttonLayout.childForceExpandWidth = false;
+            buttonLayout.childForceExpandHeight = false;
+
+            ContentSizeFitter buttonFitter = m_ButtonColumn.AddComponent<ContentSizeFitter>();
+            buttonFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            buttonFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            CreateButton(
+                "NewGameButton",
+                m_ButtonColumn.transform,
+                "New Game",
+                fontAsset,
+                new Color(0.12f, 0.68f, 0.98f, 0.96f),
+                ShowTutorialPrompt);
+
+            CreateButton(
+                "QuitButton",
+                m_ButtonColumn.transform,
+                "Quit",
+                fontAsset,
+                new Color(0.16f, 0.2f, 0.28f, 0.94f),
+                QuitGame);
+
+            m_TutorialPromptOverlay = ModalMenuPauseUtility.CreateUIObject("TutorialPromptOverlay", contentArea.transform);
+            RectTransform promptOverlayRect = m_TutorialPromptOverlay.GetComponent<RectTransform>();
+            promptOverlayRect.anchorMin = Vector2.zero;
+            promptOverlayRect.anchorMax = Vector2.one;
+            promptOverlayRect.offsetMin = Vector2.zero;
+            promptOverlayRect.offsetMax = Vector2.zero;
+            promptOverlayRect.anchoredPosition = Vector2.zero;
+
+            LayoutElement promptOverlayLayout = m_TutorialPromptOverlay.AddComponent<LayoutElement>();
+            promptOverlayLayout.ignoreLayout = true;
+
+            Image promptOverlayImage = m_TutorialPromptOverlay.AddComponent<Image>();
+            promptOverlayImage.color = new Color(0f, 0f, 0f, 0.6f);
+
+            GameObject promptFrame = ModalMenuPauseUtility.CreateUIObject("PromptFrame", m_TutorialPromptOverlay.transform);
+            RectTransform promptFrameRect = promptFrame.GetComponent<RectTransform>();
+            promptFrameRect.anchorMin = new Vector2(0.5f, 0.5f);
+            promptFrameRect.anchorMax = new Vector2(0.5f, 0.5f);
+            promptFrameRect.pivot = new Vector2(0.5f, 0.5f);
+            promptFrameRect.anchoredPosition = Vector2.zero;
+            float promptFrameWidth = Mathf.Min(m_TutorialPromptSize.x, m_MenuSize.x - 132f);
+            float promptFrameHeight = Mathf.Min(m_TutorialPromptSize.y, contentAreaHeight - 8f);
+            promptFrameRect.sizeDelta = new Vector2(promptFrameWidth, promptFrameHeight);
+
+            Image promptFrameImage = promptFrame.AddComponent<Image>();
+            promptFrameImage.color = new Color(0.02f, 0.03f, 0.05f, 0.96f);
+
+            Outline promptFrameOutline = promptFrame.AddComponent<Outline>();
+            promptFrameOutline.effectColor = new Color(0.2f, 0.52f, 0.76f, 0.45f);
+            promptFrameOutline.effectDistance = new Vector2(2f, -2f);
+
+            VerticalLayoutGroup promptLayout = promptFrame.AddComponent<VerticalLayoutGroup>();
+            promptLayout.spacing = 16f;
+            promptLayout.childAlignment = TextAnchor.MiddleCenter;
+            promptLayout.childControlWidth = true;
+            promptLayout.childControlHeight = true;
+            promptLayout.childForceExpandWidth = false;
+            promptLayout.childForceExpandHeight = false;
+            promptLayout.padding = new RectOffset(20, 20, 12, 12);
+
+            CreateLabel(
+                "PromptTitle",
+                promptFrame.transform,
+                "Play the tutorial first?",
+                fontAsset,
+                30f,
+                FontStyles.Bold,
+                new Color(0.9f, 0.98f, 1f, 1f),
+                38f,
+                false,
+                true);
+
+            CreateLabel(
+                "PromptBody",
+                promptFrame.transform,
+                "Start in the guided training level before entering the maze.",
+                fontAsset,
+                20f,
+                FontStyles.Normal,
+                new Color(0.72f, 0.86f, 0.96f, 1f),
+                46f,
+                true);
+
+            GameObject promptButtons = ModalMenuPauseUtility.CreateUIObject("PromptButtons", promptFrame.transform);
+            HorizontalLayoutGroup promptButtonLayout = promptButtons.AddComponent<HorizontalLayoutGroup>();
+            promptButtonLayout.spacing = 12f;
+            promptButtonLayout.childAlignment = TextAnchor.MiddleCenter;
+            promptButtonLayout.childControlWidth = true;
+            promptButtonLayout.childControlHeight = true;
+            promptButtonLayout.childForceExpandWidth = false;
+            promptButtonLayout.childForceExpandHeight = false;
+
+            ContentSizeFitter promptButtonFitter = promptButtons.AddComponent<ContentSizeFitter>();
+            promptButtonFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            promptButtonFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            CreateButton(
+                "TutorialYesButton",
+                promptButtons.transform,
+                "Yes",
+                fontAsset,
+                new Color(0.12f, 0.68f, 0.98f, 0.96f),
+                LoadTutorial,
+                m_TutorialChoiceButtonFontSize,
+                m_TutorialChoiceButtonSize);
+
+            CreateButton(
+                "TutorialNoButton",
+                promptButtons.transform,
+                "No",
+                fontAsset,
+                new Color(0.16f, 0.2f, 0.28f, 0.94f),
+                LoadMainGameDirectly,
+                m_TutorialChoiceButtonFontSize,
+                m_TutorialChoiceButtonSize);
+
+            CreateButton(
+                "TutorialCancelButton",
+                promptFrame.transform,
+                "Cancel",
+                fontAsset,
+                new Color(0.12f, 0.16f, 0.22f, 0.96f),
+                CancelTutorialPrompt,
+                m_TutorialCancelButtonFontSize,
+                m_TutorialCancelButtonSize);
+
+            SetTutorialPromptVisible(false);
+            ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
+        }
+
+        void TryReuseExistingMenuRoot()
+        {
+            if (m_MenuRoot != null)
+                return;
+
+            GameObject existingRoot = GameObject.Find("MainMenuCanvas");
+            if (existingRoot != null)
+                m_MenuRoot = existingRoot;
+        }
+
+        void DestroyMenuRoot()
+        {
+            if (m_MenuRoot == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(m_MenuRoot);
+            else
+                DestroyImmediate(m_MenuRoot);
+
+            m_MenuRoot = null;
+            m_ButtonColumn = null;
+            m_TutorialPromptOverlay = null;
+        }
+
+        void ConfigureMenuCanvas(Camera menuCamera)
+        {
+            if (m_MenuRoot == null)
+                return;
+
+            Canvas canvas = m_MenuRoot.GetComponent<Canvas>();
+            if (canvas == null)
+                return;
+
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = menuCamera;
+            canvas.planeDistance = Mathf.Max(menuCamera.nearClipPlane + 0.25f, m_CanvasPlaneDistance);
+        }
+
+        RectTransform ResolvePanelRect()
+        {
+            if (m_MenuRoot == null)
+                return null;
+
+            Transform panelTransform = m_MenuRoot.transform.Find("Panel");
+            return panelTransform as RectTransform;
+        }
+
+        void ConfigurePanelTransform(RectTransform panelRect)
+        {
+            if (panelRect == null)
+                return;
+
+            panelRect.anchorMin = m_PanelAnchor;
+            panelRect.anchorMax = m_PanelAnchor;
+            panelRect.pivot = new Vector2(0.5f, 0.5f);
+            panelRect.anchoredPosition = m_PanelOffset;
+            panelRect.sizeDelta = m_MenuSize;
+        }
+
+        bool MenuRootNeedsRefresh()
+        {
+            if (m_MenuRoot == null)
+                return false;
+
+            Transform panelTransform = m_MenuRoot.transform.Find("Panel");
+            if (panelTransform == null)
+                return true;
+
+            Transform contentAreaTransform = panelTransform.Find("ContentArea");
+            bool hasLegacyButtons = panelTransform.Find("Buttons") != null;
+            bool hasLegacyPromptOverlay = panelTransform.Find("TutorialPromptOverlay") != null;
+            bool hasLegacyPrompt = panelTransform.Find("TutorialPrompt") != null;
+            bool hasButtonColumn = contentAreaTransform != null && contentAreaTransform.Find("Buttons") != null;
+            bool hasPromptOverlay = contentAreaTransform != null && contentAreaTransform.Find("TutorialPromptOverlay") != null;
+            return contentAreaTransform == null || !hasButtonColumn || !hasPromptOverlay || hasLegacyButtons || hasLegacyPromptOverlay || hasLegacyPrompt;
+        }
+
+        void ResolveMenuSections()
+        {
+            if (m_MenuRoot == null)
+                return;
+
+            if (m_ButtonColumn == null)
+            {
+                Transform buttonTransform = m_MenuRoot.transform.Find("Panel/ContentArea/Buttons");
+                if (buttonTransform != null)
+                    m_ButtonColumn = buttonTransform.gameObject;
+            }
+
+            if (m_TutorialPromptOverlay == null)
+            {
+                Transform promptTransform = m_MenuRoot.transform.Find("Panel/ContentArea/TutorialPromptOverlay");
+                if (promptTransform != null)
+                    m_TutorialPromptOverlay = promptTransform.gameObject;
+            }
+        }
+
+        void SetTutorialPromptVisible(bool visible)
+        {
+            ResolveMenuSections();
+
+            if (m_ButtonColumn != null)
+                m_ButtonColumn.SetActive(!visible);
+
+            if (m_TutorialPromptOverlay != null)
+                m_TutorialPromptOverlay.SetActive(visible);
+
+            RectTransform panelRect = ResolvePanelRect();
+            if (m_MenuRoot != null && panelRect != null && m_MenuRoot.activeSelf)
+                ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
+        }
+
+        void CreateLabel(
+            string name,
+            Transform parent,
+            string text,
+            TMP_FontAsset fontAsset,
+            float fontSize,
+            FontStyles fontStyle,
+            Color color,
+            float preferredHeight,
+            bool allowWordWrap = false,
+            bool autoSizeToWidth = false)
+        {
+            GameObject labelObject = ModalMenuPauseUtility.CreateUIObject(name, parent);
+            RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+            labelRect.sizeDelta = new Vector2(0f, preferredHeight);
+            LayoutElement layoutElement = labelObject.AddComponent<LayoutElement>();
+            layoutElement.preferredHeight = preferredHeight;
+
+            TextMeshProUGUI label = labelObject.AddComponent<TextMeshProUGUI>();
+            label.font = fontAsset;
+            label.text = text;
+            label.fontSize = fontSize;
+            label.fontStyle = fontStyle;
+            label.color = color;
+            label.alignment = TextAlignmentOptions.Center;
+            label.enableWordWrapping = allowWordWrap;
+            label.enableAutoSizing = autoSizeToWidth;
+            if (autoSizeToWidth)
+            {
+                label.fontSizeMax = fontSize;
+                label.fontSizeMin = Mathf.Max(18f, fontSize * 0.55f);
+                label.enableWordWrapping = false;
+            }
+        }
+
+        void CreateButton(
+            string name,
+            Transform parent,
+            string label,
+            TMP_FontAsset fontAsset,
+            Color backgroundColor,
+            UnityEngine.Events.UnityAction onClick,
+            float labelFontSize = 30f,
+            Vector2? customSize = null)
+        {
+            GameObject buttonObject = ModalMenuPauseUtility.CreateUIObject(name, parent);
+            RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
+            Vector2 resolvedButtonSize = customSize ?? m_ButtonSize;
+            buttonRect.sizeDelta = resolvedButtonSize;
+
+            LayoutElement layoutElement = buttonObject.AddComponent<LayoutElement>();
+            layoutElement.preferredWidth = resolvedButtonSize.x;
+            layoutElement.preferredHeight = resolvedButtonSize.y;
+
+            Image buttonImage = buttonObject.AddComponent<Image>();
+            buttonImage.color = backgroundColor;
+
+            Button button = buttonObject.AddComponent<Button>();
+            button.targetGraphic = buttonImage;
+            ColorBlock colors = button.colors;
+            colors.normalColor = backgroundColor;
+            colors.highlightedColor = backgroundColor * 1.12f;
+            colors.pressedColor = backgroundColor * 0.88f;
+            colors.selectedColor = colors.highlightedColor;
+            colors.disabledColor = new Color(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.45f);
+            button.colors = colors;
+            button.onClick.AddListener(onClick);
+
+            GameObject textObject = ModalMenuPauseUtility.CreateUIObject("Label", buttonObject.transform);
+            RectTransform textRect = textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(12f, 8f);
+            textRect.offsetMax = new Vector2(-12f, -8f);
+
+            TextMeshProUGUI buttonLabel = textObject.AddComponent<TextMeshProUGUI>();
+            buttonLabel.font = fontAsset;
+            buttonLabel.text = label;
+            buttonLabel.fontSize = labelFontSize;
+            buttonLabel.fontStyle = FontStyles.Bold;
+            buttonLabel.color = Color.white;
+            buttonLabel.alignment = TextAlignmentOptions.Center;
+            buttonLabel.enableWordWrapping = false;
+            buttonLabel.enableAutoSizing = true;
+            buttonLabel.fontSizeMax = labelFontSize;
+            buttonLabel.fontSizeMin = Mathf.Max(18f, labelFontSize * 0.72f);
+        }
+
+        void ShowTutorialPrompt()
+        {
+            SetTutorialPromptVisible(true);
+        }
+
+        void CancelTutorialPrompt()
+        {
+            SetTutorialPromptVisible(false);
+        }
+
+        void LoadTutorial()
+        {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+            SceneManager.LoadScene(m_TutorialSceneName);
+        }
+
+        void LoadMainGameDirectly()
+        {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+            SceneManager.LoadScene(m_GameplaySceneName);
+        }
+
+        void QuitGame()
+        {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+#if UNITY_EDITOR
+            EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+        }
+    }
+}

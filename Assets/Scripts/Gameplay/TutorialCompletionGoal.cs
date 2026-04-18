@@ -1,36 +1,32 @@
+using TMPro;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using TMPro;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace CIS5680VRGame.Gameplay
 {
     [RequireComponent(typeof(Collider))]
-    public class LevelGoalTrigger : MonoBehaviour
+    public class TutorialCompletionGoal : MonoBehaviour
     {
+        [SerializeField] XROrigin m_PlayerRig;
+        [SerializeField] MovementModeManager m_MovementModeManager;
+        [SerializeField] Renderer[] m_TargetRenderers;
+        [SerializeField] string m_TutorialSceneName = "TutorialLevel";
+        [SerializeField] string m_GameplaySceneName = "Maze1";
+        [SerializeField] Color m_CompletedColor = new(0.34f, 0.96f, 1f, 1f);
+        [SerializeField] Color m_CompletedEmissionColor = new(0.18f, 0.72f, 1f, 1f);
+        [SerializeField] Vector2 m_MenuSize = new(960f, 560f);
+        [SerializeField] Vector2 m_ButtonSize = new(300f, 84f);
+
         static readonly int s_BaseColorId = Shader.PropertyToID("_BaseColor");
         static readonly int s_ColorId = Shader.PropertyToID("_Color");
         static readonly int s_EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
-        [SerializeField] XROrigin m_PlayerRig;
-        [SerializeField] Renderer[] m_TargetRenderers;
-        [SerializeField] GameObject[] m_EnableOnComplete;
-        [SerializeField] Color m_CompletedColor = new(0.22f, 1f, 0.72f, 1f);
-        [SerializeField] Color m_CompletedEmissionColor = new(0.08f, 0.9f, 0.55f, 1f);
-        [SerializeField] bool m_LogCompletion = true;
-        [SerializeField] Vector3 m_MenuLocalOffset = new(0f, -0.05f, 1.1f);
-        [SerializeField] Vector2 m_MenuSize = new(900f, 540f);
-        [SerializeField] Vector2 m_ButtonSize = new(240f, 84f);
-        [SerializeField] string m_MainMenuSceneName = "MainMenu";
-
-        Collider m_Trigger;
         MaterialPropertyBlock m_PropertyBlock;
+        Collider m_Trigger;
         GameObject m_MenuRoot;
-        MovementModeManager m_MovementModeManager;
+        TutorialLevelController m_TutorialLevelController;
 
         public bool HasCompleted { get; private set; }
 
@@ -42,33 +38,29 @@ namespace CIS5680VRGame.Gameplay
             if (m_PlayerRig == null)
                 m_PlayerRig = FindObjectOfType<XROrigin>();
 
+            if (m_MovementModeManager == null)
+                m_MovementModeManager = FindObjectOfType<MovementModeManager>();
+
             if (m_TargetRenderers == null || m_TargetRenderers.Length == 0)
                 m_TargetRenderers = GetComponentsInChildren<Renderer>(true);
 
-            m_MovementModeManager = FindObjectOfType<MovementModeManager>();
+            m_TutorialLevelController = FindObjectOfType<TutorialLevelController>();
             m_PropertyBlock = new MaterialPropertyBlock();
-            SetCompletionObjectsActive(false);
         }
 
         void OnTriggerEnter(Collider other)
         {
-            if (HasCompleted || !CanUse(other) || IsOverriddenByTutorialGoal())
+            if (HasCompleted || !CanUse(other))
                 return;
 
             HasCompleted = true;
+            if (m_TutorialLevelController == null)
+                m_TutorialLevelController = FindObjectOfType<TutorialLevelController>();
+
+            m_TutorialLevelController?.NotifyTutorialGoalReached();
             ApplyCompletedVisualState();
-            SetCompletionObjectsActive(true);
             ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);
             ShowCompletionMenu();
-
-            if (m_LogCompletion)
-                Debug.Log("Maze goal reached.", this);
-        }
-
-        bool IsOverriddenByTutorialGoal()
-        {
-            TutorialCompletionGoal tutorialGoal = GetComponent<TutorialCompletionGoal>();
-            return tutorialGoal != null && tutorialGoal.enabled;
         }
 
         bool CanUse(Collider other)
@@ -99,18 +91,6 @@ namespace CIS5680VRGame.Gameplay
             }
         }
 
-        void SetCompletionObjectsActive(bool active)
-        {
-            if (m_EnableOnComplete == null)
-                return;
-
-            for (int i = 0; i < m_EnableOnComplete.Length; i++)
-            {
-                if (m_EnableOnComplete[i] != null)
-                    m_EnableOnComplete[i].SetActive(active);
-            }
-        }
-
         void ShowCompletionMenu()
         {
             if (m_MenuRoot != null)
@@ -125,7 +105,7 @@ namespace CIS5680VRGame.Gameplay
 
             RectTransform panelRect;
             m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
-                "LevelCompleteMenu",
+                "TutorialCompleteMenu",
                 menuCamera,
                 m_MenuSize,
                 new Color(0f, 0f, 0f, 0.42f),
@@ -133,11 +113,11 @@ namespace CIS5680VRGame.Gameplay
 
             GameObject panel = panelRect.gameObject;
             Image panelImage = panel.AddComponent<Image>();
-            panelImage.color = new Color(0.03f, 0.05f, 0.07f, 0.94f);
+            panelImage.color = new Color(0.02f, 0.05f, 0.09f, 0.94f);
 
             VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(48, 48, 42, 42);
-            layout.spacing = 24f;
+            layout.spacing = 22f;
             layout.childAlignment = TextAnchor.MiddleCenter;
             layout.childControlHeight = false;
             layout.childControlWidth = true;
@@ -153,26 +133,26 @@ namespace CIS5680VRGame.Gameplay
             CreateLabel(
                 "Title",
                 panel.transform,
-                "Goal Reached",
+                "Tutorial Complete",
                 fontAsset,
-                64f,
+                60f,
                 FontStyles.Bold,
-                new Color(0.9f, 1f, 0.96f, 1f),
-                110f);
+                new Color(0.9f, 0.98f, 1f, 1f),
+                96f);
 
             CreateLabel(
                 "Message",
                 panel.transform,
-                "You escaped the maze.",
+                "You are ready for the maze. Start the full game or replay the tutorial.",
                 fontAsset,
-                34f,
+                28f,
                 FontStyles.Normal,
-                new Color(0.72f, 0.88f, 0.98f, 1f),
+                new Color(0.74f, 0.88f, 0.98f, 1f),
                 84f);
 
-            GameObject buttonRow = CreateUIObject("Buttons", panel.transform);
+            GameObject buttonRow = ModalMenuPauseUtility.CreateUIObject("Buttons", panel.transform);
             HorizontalLayoutGroup buttonLayout = buttonRow.AddComponent<HorizontalLayoutGroup>();
-            buttonLayout.spacing = 28f;
+            buttonLayout.spacing = 24f;
             buttonLayout.childAlignment = TextAnchor.MiddleCenter;
             buttonLayout.childControlWidth = true;
             buttonLayout.childControlHeight = true;
@@ -184,36 +164,22 @@ namespace CIS5680VRGame.Gameplay
             buttonFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             CreateButton(
-                "RestartButton",
+                "StartGameButton",
                 buttonRow.transform,
-                "Restart",
+                "Start Game",
                 fontAsset,
-                new Color(0.12f, 0.65f, 0.96f, 0.94f),
-                RestartLevel);
+                new Color(0.12f, 0.68f, 0.98f, 0.96f),
+                StartGame);
 
             CreateButton(
-                "MainMenuButton",
+                "RestartTutorialButton",
                 buttonRow.transform,
-                "Return to Main Menu",
+                "Restart Tutorial",
                 fontAsset,
-                new Color(0.1f, 0.14f, 0.2f, 0.94f),
-                ReturnToMainMenu,
-                22f);
-
-            CreateButton(
-                "QuitButton",
-                buttonRow.transform,
-                "Quit",
-                fontAsset,
-                new Color(0.12f, 0.16f, 0.22f, 0.94f),
-                QuitApplication);
+                new Color(0.16f, 0.22f, 0.3f, 0.94f),
+                RestartTutorial);
 
             ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
-        }
-
-        GameObject CreateUIObject(string name, Transform parent)
-        {
-            return ModalMenuPauseUtility.CreateUIObject(name, parent);
         }
 
         void CreateLabel(
@@ -226,7 +192,7 @@ namespace CIS5680VRGame.Gameplay
             Color color,
             float preferredHeight)
         {
-            GameObject labelObject = CreateUIObject(name, parent);
+            GameObject labelObject = ModalMenuPauseUtility.CreateUIObject(name, parent);
             LayoutElement layoutElement = labelObject.AddComponent<LayoutElement>();
             layoutElement.preferredHeight = preferredHeight;
 
@@ -245,10 +211,9 @@ namespace CIS5680VRGame.Gameplay
             string label,
             TMP_FontAsset fontAsset,
             Color backgroundColor,
-            UnityEngine.Events.UnityAction onClick,
-            float fontSize = 30f)
+            UnityEngine.Events.UnityAction onClick)
         {
-            GameObject buttonObject = CreateUIObject(name, parent);
+            GameObject buttonObject = ModalMenuPauseUtility.CreateUIObject(name, parent);
             RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
             buttonRect.sizeDelta = m_ButtonSize;
 
@@ -270,7 +235,7 @@ namespace CIS5680VRGame.Gameplay
             button.colors = colors;
             button.onClick.AddListener(onClick);
 
-            GameObject textObject = CreateUIObject("Label", buttonObject.transform);
+            GameObject textObject = ModalMenuPauseUtility.CreateUIObject("Label", buttonObject.transform);
             RectTransform textRect = textObject.GetComponent<RectTransform>();
             textRect.anchorMin = Vector2.zero;
             textRect.anchorMax = Vector2.one;
@@ -280,34 +245,23 @@ namespace CIS5680VRGame.Gameplay
             TextMeshProUGUI buttonLabel = textObject.AddComponent<TextMeshProUGUI>();
             buttonLabel.font = fontAsset;
             buttonLabel.text = label;
-            buttonLabel.fontSize = fontSize;
+            buttonLabel.fontSize = 28f;
             buttonLabel.fontStyle = FontStyles.Bold;
             buttonLabel.color = Color.white;
             buttonLabel.alignment = TextAlignmentOptions.Center;
             buttonLabel.enableWordWrapping = false;
         }
 
-        void RestartLevel()
+        void RestartTutorial()
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
-            Scene activeScene = SceneManager.GetActiveScene();
-            SceneManager.LoadScene(activeScene.name);
+            SceneManager.LoadScene(m_TutorialSceneName);
         }
 
-        void ReturnToMainMenu()
+        void StartGame()
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
-            SceneManager.LoadScene(m_MainMenuSceneName);
-        }
-
-        void QuitApplication()
-        {
-            ModalMenuPauseUtility.ResumeGameplayAfterMenu();
-#if UNITY_EDITOR
-            EditorApplication.isPlaying = false;
-#else
-            Application.Quit();
-#endif
+            SceneManager.LoadScene(m_GameplaySceneName);
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using CIS5680VRGame.Balls;
@@ -11,6 +12,8 @@ namespace CIS5680VRGame.Gameplay
     [DefaultExecutionOrder(250)]
     public class RefillStationLocatorGuidance : MonoBehaviour
     {
+        public static event Action GuidancePingTriggered;
+
         const string k_MainCameraPath = "XR Origin (XR Rig)/Camera Offset/Main Camera";
         const string k_HighlightMaterialResourcePath = "Materials/M_RefillStationLocatorHighlight";
         const string k_SectorShellMaterialResourcePath = "Materials/M_RefillStationSectorShell";
@@ -536,6 +539,7 @@ namespace CIS5680VRGame.Gameplay
 
             TriggerSectorShell(origin, forward);
             m_NextAvailablePingTime = Time.unscaledTime + Mathf.Max(0.1f, m_Cooldown);
+            GuidancePingTriggered?.Invoke();
         }
 
         bool IsPlayerHoldingObject()

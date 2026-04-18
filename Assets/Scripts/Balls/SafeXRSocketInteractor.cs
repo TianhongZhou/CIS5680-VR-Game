@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Reflection;
 using UnityEngine;
@@ -46,7 +47,16 @@ namespace CIS5680VRGame.Balls
         protected override void OnDisable()
         {
             EnsureUpdateRoutine();
-            base.OnDisable();
+
+            try
+            {
+                base.OnDisable();
+            }
+            catch (NullReferenceException)
+            {
+                // XRIT 3.1.2 can throw during socket teardown if teleportation state was never fully initialised.
+                // Swallowing the teardown exception keeps socket-backed holsters stable when gameplay is paused.
+            }
         }
     }
 }

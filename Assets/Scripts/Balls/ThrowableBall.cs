@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -11,6 +12,8 @@ namespace CIS5680VRGame.Balls
     [RequireComponent(typeof(UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable))]
     public class ThrowableBall : MonoBehaviour
     {
+        public static event Action<BallType, Vector3, Vector3, GameObject> ImpactOccurred;
+
         static readonly MethodInfo s_ResetThrowSmoothingMethod =
             typeof(UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable).GetMethod("ResetThrowSmoothing", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -103,6 +106,7 @@ namespace CIS5680VRGame.Balls
             m_Consumed = true;
 
             var context = new BallImpactContext(contact.point, contact.normal, gameObject, collision);
+            ImpactOccurred?.Invoke(m_ImpactEffect.BallType, contact.point, contact.normal, gameObject);
             m_ImpactEffect.Apply(context);
 
             if (m_DestroyOnImpact)

@@ -332,7 +332,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_BallType: 2
   m_PulseManager: {fileID: 0}
-  m_PulseRadius: 15
+  m_PulseRadius: 10
   m_PulseInterval: 8
   m_PulseCount: 3
   m_StickSurfaceOffset: 0.02

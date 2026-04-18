@@ -23,12 +23,16 @@ namespace CIS5680VRGame.Balls
         PlayerEnergy m_PlayerEnergy;
         int m_RemainingCount;
         int m_ResolvedEnergyCost;
+        bool m_HasResolvedEnergyCost;
+        bool m_HasTemporaryEnergyCostOverride;
+        int m_TemporaryEnergyCostOverride;
         Coroutine m_SpawnCoroutine;
 
         public string DisplayName => m_DisplayName;
         public bool IsInfinite => m_StartingCount < 0;
         public int RemainingCount => m_RemainingCount;
-        public int EnergyCost => m_ResolvedEnergyCost;
+        public int DefaultEnergyCost => GetResolvedEnergyCost();
+        public int EnergyCost => m_HasTemporaryEnergyCostOverride ? m_TemporaryEnergyCostOverride : GetResolvedEnergyCost();
         public bool UsesEnergy => m_PlayerEnergy != null;
         public bool IsFull => UsesEnergy
             ? m_PlayerEnergy.CurrentEnergy >= m_PlayerEnergy.MaxEnergy
@@ -40,6 +44,7 @@ namespace CIS5680VRGame.Balls
             m_PlayerEnergy = FindObjectOfType<PlayerEnergy>();
             m_RemainingCount = m_StartingCount;
             m_ResolvedEnergyCost = ResolveEnergyCost();
+            m_HasResolvedEnergyCost = true;
 
             if (m_HoverInfoText != null)
                 m_HoverInfoText.enabled = false;
@@ -115,6 +120,19 @@ namespace CIS5680VRGame.Balls
         public bool TryConsumeEnergyForTakenBall()
         {
             return !UsesEnergy || m_PlayerEnergy.TryConsume(EnergyCost);
+        }
+
+        public void SetTemporaryEnergyCostOverride(int? energyCost)
+        {
+            if (energyCost.HasValue)
+            {
+                m_HasTemporaryEnergyCostOverride = true;
+                m_TemporaryEnergyCostOverride = Mathf.Max(0, energyCost.Value);
+                return;
+            }
+
+            m_HasTemporaryEnergyCostOverride = false;
+            m_TemporaryEnergyCostOverride = 0;
         }
 
         bool HasStock()
@@ -213,9 +231,20 @@ namespace CIS5680VRGame.Balls
             return effect.BallType switch
             {
                 BallType.Sonar => 10,
-                BallType.StickyPulse => 20,
+                BallType.StickyPulse => 25,
                 _ => 0,
             };
+        }
+
+        int GetResolvedEnergyCost()
+        {
+            if (!m_HasResolvedEnergyCost)
+            {
+                m_ResolvedEnergyCost = ResolveEnergyCost();
+                m_HasResolvedEnergyCost = true;
+            }
+
+            return m_ResolvedEnergyCost;
         }
     }
 }

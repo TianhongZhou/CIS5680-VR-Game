@@ -7,12 +7,17 @@ using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using Object = UnityEngine.Object;
+using System.Collections.Generic;
 
 namespace CIS5680VRGame.Gameplay
 {
     static class ModalMenuPauseUtility
     {
         static bool s_IsPausedForMenu;
+        static readonly List<Behaviour> s_DisabledBehaviours = new();
+        static MovementModeManager s_LockedMovementModeManager;
+
+        public static bool IsPausedForMenu => s_IsPausedForMenu;
 
         public static void PauseGameplayForMenu(XROrigin playerRig, MovementModeManager movementModeManager)
         {
@@ -20,16 +25,24 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             s_IsPausedForMenu = true;
+            s_DisabledBehaviours.Clear();
             ReleaseSelectedObjects(playerRig);
             DisableGameplayInteractions();
-            movementModeManager?.LockMovement();
+            s_LockedMovementModeManager = movementModeManager;
+            s_LockedMovementModeManager?.LockMovement();
             Time.timeScale = 0f;
             AudioListener.pause = true;
         }
 
         public static void ResumeGameplayAfterMenu()
         {
+            if (!s_IsPausedForMenu)
+                return;
+
             s_IsPausedForMenu = false;
+            RestoreGameplayInteractions();
+            s_LockedMovementModeManager?.UnlockMovement();
+            s_LockedMovementModeManager = null;
             Time.timeScale = 1f;
             AudioListener.pause = false;
         }
@@ -105,6 +118,23 @@ namespace CIS5680VRGame.Gameplay
             return go;
         }
 
+        public static void RefreshMenuLayout(GameObject menuRoot, RectTransform panelRect)
+        {
+            if (menuRoot == null || panelRect == null || !menuRoot.activeInHierarchy)
+                return;
+
+            TextMeshProUGUI[] textElements = menuRoot.GetComponentsInChildren<TextMeshProUGUI>(true);
+            for (int i = 0; i < textElements.Length; i++)
+            {
+                if (textElements[i] != null)
+                    textElements[i].ForceMeshUpdate();
+            }
+
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(panelRect);
+            Canvas.ForceUpdateCanvases();
+        }
+
         static void ReleaseSelectedObjects(XROrigin playerRig)
         {
             if (playerRig == null)
@@ -134,25 +164,37 @@ namespace CIS5680VRGame.Gameplay
 
         static void DisableGameplayInteractions()
         {
-            XRBaseInteractable[] interactables = Object.FindObjectsOfType<XRBaseInteractable>(true);
-            for (int i = 0; i < interactables.Length; i++)
+            DisableAndRemember(Object.FindObjectsOfType<XRBaseInteractable>(true));
+            DisableAndRemember(Object.FindObjectsOfType<BallHolsterSlot>(true));
+            DisableAndRemember(Object.FindObjectsOfType<RefillStationLocatorGuidance>(true));
+            DisableAndRemember(Object.FindObjectsOfType<MovementModeToggleInput>(true));
+        }
+
+        static void RestoreGameplayInteractions()
+        {
+            for (int i = 0; i < s_DisabledBehaviours.Count; i++)
             {
-                if (interactables[i] != null)
-                    interactables[i].enabled = false;
+                Behaviour behaviour = s_DisabledBehaviours[i];
+                if (behaviour != null)
+                    behaviour.enabled = true;
             }
 
-            BallHolsterSlot[] holsterSlots = Object.FindObjectsOfType<BallHolsterSlot>(true);
-            for (int i = 0; i < holsterSlots.Length; i++)
-            {
-                if (holsterSlots[i] != null)
-                    holsterSlots[i].enabled = false;
-            }
+            s_DisabledBehaviours.Clear();
+        }
 
-            RefillStationLocatorGuidance[] locatorGuidance = Object.FindObjectsOfType<RefillStationLocatorGuidance>(true);
-            for (int i = 0; i < locatorGuidance.Length; i++)
+        static void DisableAndRemember<T>(T[] behaviours) where T : Behaviour
+        {
+            if (behaviours == null)
+                return;
+
+            for (int i = 0; i < behaviours.Length; i++)
             {
-                if (locatorGuidance[i] != null)
-                    locatorGuidance[i].enabled = false;
+                T behaviour = behaviours[i];
+                if (behaviour == null || !behaviour.enabled)
+                    continue;
+
+                s_DisabledBehaviours.Add(behaviour);
+                behaviour.enabled = false;
             }
         }
 
