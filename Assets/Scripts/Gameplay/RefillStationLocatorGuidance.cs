@@ -35,6 +35,8 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] float m_ForwardThreshold = 0.55f;
         [SerializeField] float m_ResetThreshold = 0.2f;
         [SerializeField] float m_MaxHorizontalMagnitude = 0.55f;
+        [SerializeField] float m_PingHapticsAmplitude = 0.14f;
+        [SerializeField] float m_PingHapticsDuration = 0.05f;
         [SerializeField] Vector3 m_PadScaleMultiplier = new(1.18f, 1.6f, 1.18f);
         [SerializeField] float m_PadLift = 0.02f;
         [SerializeField] float m_PulseFrequency = 2.4f;
@@ -482,10 +484,7 @@ namespace CIS5680VRGame.Gameplay
         bool TryGetRightStickValue(out Vector2 stickValue)
         {
             stickValue = Vector2.zero;
-            s_RightControllerDevices.Clear();
-            InputDevices.GetDevicesWithCharacteristics(
-                InputDeviceCharacteristics.Right | InputDeviceCharacteristics.Controller | InputDeviceCharacteristics.HeldInHand,
-                s_RightControllerDevices);
+            RefreshRightControllerDevices();
 
             for (int i = 0; i < s_RightControllerDevices.Count; i++)
             {
@@ -498,6 +497,14 @@ namespace CIS5680VRGame.Gameplay
             }
 
             return false;
+        }
+
+        static void RefreshRightControllerDevices()
+        {
+            s_RightControllerDevices.Clear();
+            InputDevices.GetDevicesWithCharacteristics(
+                InputDeviceCharacteristics.Right | InputDeviceCharacteristics.Controller | InputDeviceCharacteristics.HeldInHand,
+                s_RightControllerDevices);
         }
 
         void TryTriggerGuidancePing()
@@ -538,8 +545,31 @@ namespace CIS5680VRGame.Gameplay
             }
 
             TriggerSectorShell(origin, forward);
+            TriggerLocatorFeedback();
             m_NextAvailablePingTime = Time.unscaledTime + Mathf.Max(0.1f, m_Cooldown);
             GuidancePingTriggered?.Invoke();
+        }
+
+        void TriggerLocatorFeedback()
+        {
+            PulseAudioService.PlayLocatorPing();
+            TriggerRightHandHaptics();
+        }
+
+        void TriggerRightHandHaptics()
+        {
+            RefreshRightControllerDevices();
+
+            float amplitude = Mathf.Clamp01(m_PingHapticsAmplitude);
+            float duration = Mathf.Max(0.01f, m_PingHapticsDuration);
+            for (int i = 0; i < s_RightControllerDevices.Count; i++)
+            {
+                InputDevice device = s_RightControllerDevices[i];
+                if (!device.isValid || !device.TryGetHapticCapabilities(out HapticCapabilities capabilities) || !capabilities.supportsImpulse)
+                    continue;
+
+                device.SendHapticImpulse(0u, amplitude, duration);
+            }
         }
 
         bool IsPlayerHoldingObject()

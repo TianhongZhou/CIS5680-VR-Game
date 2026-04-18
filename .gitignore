@@ -86,8 +86,10 @@ InitTestScene*.unity*
 # Unity Burst debug output
 *_BurstDebugInformation_DoNotShip/
 
-# Design documents (keep local only)
+# Local documents and personal notes (keep local only)
 Design Doc/
+/Local Docs/
+/GeneratedSFX/
 
 # Unity Version Control / Plastic (team uses Git)
 /.plastic/

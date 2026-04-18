@@ -4,8 +4,11 @@ using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.XR.Interaction.Toolkit;
+using UnityEngine.XR.Interaction.Toolkit.Inputs;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
+using UnityEngine.XR.Interaction.Toolkit.Locomotion;
+using UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets;
 using Object = UnityEngine.Object;
 using System.Collections.Generic;
 
@@ -16,8 +19,12 @@ namespace CIS5680VRGame.Gameplay
         static bool s_IsPausedForMenu;
         static readonly List<Behaviour> s_DisabledBehaviours = new();
         static MovementModeManager s_LockedMovementModeManager;
+        static bool s_IsLockedForTransition;
+        static readonly List<Behaviour> s_TransitionDisabledBehaviours = new();
+        static MovementModeManager s_TransitionLockedMovementModeManager;
 
         public static bool IsPausedForMenu => s_IsPausedForMenu;
+        public static bool IsLockedForTransition => s_IsLockedForTransition;
 
         public static void PauseGameplayForMenu(XROrigin playerRig, MovementModeManager movementModeManager)
         {
@@ -27,7 +34,7 @@ namespace CIS5680VRGame.Gameplay
             s_IsPausedForMenu = true;
             s_DisabledBehaviours.Clear();
             ReleaseSelectedObjects(playerRig);
-            DisableGameplayInteractions();
+            DisableGameplayInteractions(s_DisabledBehaviours);
             s_LockedMovementModeManager = movementModeManager;
             s_LockedMovementModeManager?.LockMovement();
             Time.timeScale = 0f;
@@ -40,11 +47,43 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             s_IsPausedForMenu = false;
-            RestoreGameplayInteractions();
+            RestoreGameplayInteractions(s_DisabledBehaviours);
             s_LockedMovementModeManager?.UnlockMovement();
             s_LockedMovementModeManager = null;
             Time.timeScale = 1f;
             AudioListener.pause = false;
+        }
+
+        public static void LockGameplayInputForTransition(XROrigin playerRig = null, MovementModeManager movementModeManager = null)
+        {
+            s_IsLockedForTransition = true;
+            RefreshGameplayInputLockForTransition(playerRig, movementModeManager);
+        }
+
+        public static void RefreshGameplayInputLockForTransition(XROrigin playerRig = null, MovementModeManager movementModeManager = null)
+        {
+            if (!s_IsLockedForTransition)
+                s_IsLockedForTransition = true;
+
+            ReleaseSelectedObjects(playerRig);
+            s_TransitionDisabledBehaviours.Clear();
+            DisableTransitionGameplayInput(playerRig, s_TransitionDisabledBehaviours);
+
+            s_TransitionLockedMovementModeManager = movementModeManager != null
+                ? movementModeManager
+                : Object.FindObjectOfType<MovementModeManager>();
+            s_TransitionLockedMovementModeManager?.LockMovement();
+        }
+
+        public static void UnlockGameplayInputAfterTransition()
+        {
+            if (!s_IsLockedForTransition)
+                return;
+
+            s_IsLockedForTransition = false;
+            RestoreGameplayInteractions(s_TransitionDisabledBehaviours);
+            s_TransitionLockedMovementModeManager?.UnlockMovement();
+            s_TransitionLockedMovementModeManager = null;
         }
 
         public static Camera ResolveMenuCamera(XROrigin playerRig)
@@ -162,29 +201,71 @@ namespace CIS5680VRGame.Gameplay
             }
         }
 
-        static void DisableGameplayInteractions()
+        static void DisableGameplayInteractions(
+            List<Behaviour> disabledBehaviours,
+            bool includeInteractors = false,
+            bool includeInputManagers = false,
+            bool includeLocomotionProviders = false)
         {
-            DisableAndRemember(Object.FindObjectsOfType<XRBaseInteractable>(true));
-            DisableAndRemember(Object.FindObjectsOfType<BallHolsterSlot>(true));
-            DisableAndRemember(Object.FindObjectsOfType<RefillStationLocatorGuidance>(true));
-            DisableAndRemember(Object.FindObjectsOfType<MovementModeToggleInput>(true));
+            DisableAndRemember(Object.FindObjectsOfType<XRBaseInteractable>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<BallHolsterSlot>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<RefillStationLocatorGuidance>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<MovementModeToggleInput>(true), disabledBehaviours);
+
+            if (includeInteractors)
+                DisableAndRemember(Object.FindObjectsOfType<XRBaseInteractor>(true), disabledBehaviours);
+
+            if (includeInputManagers)
+            {
+                DisableAndRemember(Object.FindObjectsOfType<InputActionManager>(true), disabledBehaviours);
+                DisableAndRemember(Object.FindObjectsOfType<ControllerInputActionManager>(true), disabledBehaviours);
+            }
+
+            if (includeLocomotionProviders)
+                DisableAndRemember(Object.FindObjectsOfType<LocomotionProvider>(true), disabledBehaviours);
         }
 
-        static void RestoreGameplayInteractions()
+        static void DisableTransitionGameplayInput(XROrigin playerRig, List<Behaviour> disabledBehaviours)
         {
-            for (int i = 0; i < s_DisabledBehaviours.Count; i++)
+            if (playerRig == null)
+                playerRig = Object.FindObjectOfType<XROrigin>();
+
+            DisableAndRemember(Object.FindObjectsOfType<RefillStationLocatorGuidance>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<MovementModeToggleInput>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<InputActionManager>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<ControllerInputActionManager>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<LocomotionProvider>(true), disabledBehaviours);
+
+            if (playerRig == null)
+                return;
+
+            XRBaseInteractor[] interactors = playerRig.GetComponentsInChildren<XRBaseInteractor>(true);
+            for (int i = 0; i < interactors.Length; i++)
             {
-                Behaviour behaviour = s_DisabledBehaviours[i];
+                XRBaseInteractor interactor = interactors[i];
+                if (interactor == null || !interactor.enabled || interactor is XRSocketInteractor)
+                    continue;
+
+                disabledBehaviours.Add(interactor);
+                interactor.enabled = false;
+            }
+        }
+
+        static void RestoreGameplayInteractions(List<Behaviour> disabledBehaviours)
+        {
+            for (int i = 0; i < disabledBehaviours.Count; i++)
+            {
+                Behaviour behaviour = disabledBehaviours[i];
                 if (behaviour != null)
                     behaviour.enabled = true;
             }
 
-            s_DisabledBehaviours.Clear();
+            disabledBehaviours.Clear();
         }
 
-        static void DisableAndRemember<T>(T[] behaviours) where T : Behaviour
+        static void DisableAndRemember<T>(T[] behaviours, List<Behaviour> disabledBehaviours) where T : Behaviour
         {
-            if (behaviours == null)
+            if (behaviours == null || disabledBehaviours == null)
                 return;
 
             for (int i = 0; i < behaviours.Length; i++)
@@ -193,7 +274,7 @@ namespace CIS5680VRGame.Gameplay
                 if (behaviour == null || !behaviour.enabled)
                     continue;
 
-                s_DisabledBehaviours.Add(behaviour);
+                disabledBehaviours.Add(behaviour);
                 behaviour.enabled = false;
             }
         }

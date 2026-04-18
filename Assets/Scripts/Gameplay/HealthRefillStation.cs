@@ -155,6 +155,7 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             m_CooldownEndsAt = Time.time + Mathf.Max(0.1f, m_Cooldown);
+            PulseAudioService.PlayResourceRestored();
 
             if (args.interactorObject is UnityEngine.XR.Interaction.Toolkit.Interactors.XRBaseInputInteractor inputInteractor)
                 inputInteractor.SendHapticImpulse(Mathf.Clamp01(m_UseHapticsAmplitude), Mathf.Max(0.01f, m_UseHapticsDuration));

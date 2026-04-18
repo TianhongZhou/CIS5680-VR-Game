@@ -1,5 +1,6 @@
 using UnityEngine;
 using Unity.XR.CoreUtils;
+using CIS5680VRGame.Gameplay;
 
 namespace CIS5680VRGame.Balls
 {
@@ -26,10 +27,12 @@ namespace CIS5680VRGame.Balls
             {
                 destination += Vector3.up * m_XROrigin.CameraInOriginSpaceHeight;
                 m_XROrigin.MoveCameraToWorldLocation(destination);
+                PulseAudioService.PlayTeleportArrival(0.96f);
                 return;
             }
 
             m_FallbackRigRoot.position = destination;
+            PulseAudioService.PlayTeleportArrival(0.96f);
         }
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using CIS5680VRGame.Gameplay;
 
 namespace CIS5680VRGame.Balls
 {
@@ -25,6 +26,7 @@ namespace CIS5680VRGame.Balls
                 return;
 
             m_PulseManager.SpawnPulse(context.HitPoint, context.HitNormal, m_PulseRadius, context.Collision.collider);
+            PulseAudioService.PlayPulse(context.HitPoint);
             PulseSpawned?.Invoke(context.HitPoint, m_PulseRadius, context.Collision.collider);
         }
     }

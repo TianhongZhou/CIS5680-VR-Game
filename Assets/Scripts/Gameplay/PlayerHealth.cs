@@ -46,6 +46,7 @@ namespace CIS5680VRGame.Gameplay
 
         public event Action<int, int> HealthChanged;
         public event Action<HealthChangeContext> HealthChangedDetailed;
+        public event Action<float, HealthChangeReason> DamageApplied;
         public event Action Died;
 
         public int CurrentHealth => m_CurrentHealth;
@@ -107,9 +108,15 @@ namespace CIS5680VRGame.Gameplay
             if (m_IsDead || amount <= 0f)
                 return false;
 
+            float appliedDamage = Mathf.Min(amount, m_CurrentHealthValue);
+            if (appliedDamage <= 0.0001f)
+                return false;
+
             m_TimeSinceLastDamage = 0f;
             m_RegenTimer = 0f;
-            return SetCurrentHealthValue(m_CurrentHealthValue - amount, reason);
+            DamageApplied?.Invoke(appliedDamage, reason);
+            SetCurrentHealthValue(m_CurrentHealthValue - appliedDamage, reason);
+            return true;
         }
 
         public bool RestoreToMax(HealthChangeReason reason = HealthChangeReason.RefillStation)

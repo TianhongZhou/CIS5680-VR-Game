@@ -9,6 +9,7 @@ using TMPro;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using CIS5680VRGame.UI;
 
 namespace CIS5680VRGame.Gameplay
 {
@@ -37,6 +38,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] float m_DamageHapticsAmplitude = 0.32f;
         [SerializeField] float m_DamageHapticsDuration = 0.1f;
         [SerializeField] float m_DamageHapticsCooldown = 0.18f;
+        [SerializeField] float m_DamageAudioCooldown = 0.16f;
         [SerializeField] Vector3 m_MenuLocalOffset = new(0f, -0.05f, 1.1f);
         [SerializeField] Vector2 m_MenuSize = new(900f, 540f);
         [SerializeField] Vector2 m_ButtonSize = new(240f, 84f);
@@ -52,6 +54,7 @@ namespace CIS5680VRGame.Gameplay
         GameObject m_MenuRoot;
         float m_DamageFlashStrength;
         float m_LastDamageHapticsTime = -999f;
+        float m_LastDamageAudioTime = -999f;
 
         void Awake()
         {
@@ -154,7 +157,7 @@ namespace CIS5680VRGame.Gameplay
             if (m_PlayerHealth == null)
                 return;
 
-            m_PlayerHealth.HealthChangedDetailed += OnHealthChanged;
+            m_PlayerHealth.DamageApplied += OnDamageApplied;
             m_PlayerHealth.Died += OnPlayerDied;
         }
 
@@ -163,18 +166,19 @@ namespace CIS5680VRGame.Gameplay
             if (m_PlayerHealth == null)
                 return;
 
-            m_PlayerHealth.HealthChangedDetailed -= OnHealthChanged;
+            m_PlayerHealth.DamageApplied -= OnDamageApplied;
             m_PlayerHealth.Died -= OnPlayerDied;
         }
 
-        void OnHealthChanged(HealthChangeContext context)
+        void OnDamageApplied(float amount, HealthChangeReason reason)
         {
-            if (context.Reason != HealthChangeReason.Damage || context.Delta >= 0)
+            if (reason != HealthChangeReason.Damage || amount <= 0f)
                 return;
 
-            float normalizedDamage = Mathf.Clamp01(Mathf.Abs(context.Delta) / 10f);
+            float normalizedDamage = Mathf.Clamp01(amount / 10f);
             m_DamageFlashStrength = Mathf.Max(m_DamageFlashStrength, 0.72f + normalizedDamage * 0.28f);
             TriggerDamageHaptics(normalizedDamage);
+            TriggerDamageAudio(normalizedDamage);
         }
 
         void OnPlayerDied()
@@ -196,6 +200,16 @@ namespace CIS5680VRGame.Gameplay
 
             SendHaptics(InputDeviceCharacteristics.Left | InputDeviceCharacteristics.Controller | InputDeviceCharacteristics.HeldInHand, amplitude, duration);
             SendHaptics(InputDeviceCharacteristics.Right | InputDeviceCharacteristics.Controller | InputDeviceCharacteristics.HeldInHand, amplitude, duration);
+        }
+
+        void TriggerDamageAudio(float normalizedDamage)
+        {
+            if (Time.unscaledTime - m_LastDamageAudioTime < m_DamageAudioCooldown)
+                return;
+
+            m_LastDamageAudioTime = Time.unscaledTime;
+            float volumeScale = Mathf.Lerp(0.72f, 0.98f, normalizedDamage);
+            PulseAudioService.PlayDamageTaken(volumeScale);
         }
 
         void SendHaptics(InputDeviceCharacteristics characteristics, float amplitude, float duration)
@@ -432,7 +446,8 @@ namespace CIS5680VRGame.Gameplay
                 "Restart",
                 fontAsset,
                 new Color(0.76f, 0.14f, 0.18f, 0.94f),
-                RestartLevel);
+                RestartLevel,
+                UIButtonSoundStyle.Confirm);
 
             CreateButton(
                 "MainMenuButton",
@@ -441,6 +456,7 @@ namespace CIS5680VRGame.Gameplay
                 fontAsset,
                 new Color(0.18f, 0.1f, 0.12f, 0.94f),
                 ReturnToMainMenu,
+                UIButtonSoundStyle.Normal,
                 22f);
 
             CreateButton(
@@ -449,7 +465,8 @@ namespace CIS5680VRGame.Gameplay
                 "Quit",
                 fontAsset,
                 new Color(0.2f, 0.12f, 0.14f, 0.94f),
-                QuitApplication);
+                QuitApplication,
+                UIButtonSoundStyle.Cancel);
 
             ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
         }
@@ -489,6 +506,7 @@ namespace CIS5680VRGame.Gameplay
             TMP_FontAsset fontAsset,
             Color backgroundColor,
             UnityEngine.Events.UnityAction onClick,
+            UIButtonSoundStyle soundStyle = UIButtonSoundStyle.Normal,
             float fontSize = 30f)
         {
             GameObject buttonObject = CreateUIObject(name, parent);
@@ -511,6 +529,7 @@ namespace CIS5680VRGame.Gameplay
             colors.selectedColor = colors.highlightedColor;
             colors.disabledColor = new Color(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.45f);
             button.colors = colors;
+            UIButtonAudioFeedback.Attach(button, soundStyle);
             button.onClick.AddListener(onClick);
 
             GameObject textObject = CreateUIObject("Label", buttonObject.transform);
@@ -534,13 +553,13 @@ namespace CIS5680VRGame.Gameplay
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
             Scene activeScene = SceneManager.GetActiveScene();
-            SceneManager.LoadScene(activeScene.name);
+            SceneTransitionService.LoadScene(activeScene.name);
         }
 
         void ReturnToMainMenu()
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
-            SceneManager.LoadScene(m_MainMenuSceneName);
+            SceneTransitionService.LoadScene(m_MainMenuSceneName);
         }
 
         void QuitApplication()

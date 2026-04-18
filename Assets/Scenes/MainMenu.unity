@@ -21026,6 +21026,7 @@ MonoBehaviour:
   m_PanelAnchor: {x: 0.34, y: 0.52}
   m_PanelOffset: {x: 180, y: -160}
   m_CanvasPlaneDistance: 0.5
+  m_BackgroundMusicVolume: 0.32
 --- !u!4 &2079030263
 Transform:
   m_ObjectHideFlags: 0

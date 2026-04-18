@@ -12,6 +12,8 @@ namespace CIS5680VRGame.UI
 {
     public class MainMenuController : MonoBehaviour
     {
+        const string MainMenuMusicClipPath = "Audio/Music/Music_MainMenu";
+
         [SerializeField] string m_GameplaySceneName = "Maze1";
         [SerializeField] string m_TutorialSceneName = "TutorialLevel";
         [SerializeField] XROrigin m_PlayerRig;
@@ -26,10 +28,13 @@ namespace CIS5680VRGame.UI
         [SerializeField] Vector2 m_PanelAnchor = new(0.34f, 0.52f);
         [SerializeField] Vector2 m_PanelOffset = Vector2.zero;
         [SerializeField] float m_CanvasPlaneDistance = 1.05f;
+        [SerializeField, Range(0f, 1f)] float m_BackgroundMusicVolume = 0.32f;
 
         GameObject m_MenuRoot;
         GameObject m_ButtonColumn;
         GameObject m_TutorialPromptOverlay;
+        AudioSource m_BackgroundMusicSource;
+        AudioClip m_BackgroundMusicClip;
 
         void Reset()
         {
@@ -43,10 +48,14 @@ namespace CIS5680VRGame.UI
             AudioListener.pause = false;
             TryReuseExistingMenuRoot();
             CreateMenuIfNeeded();
+            EnsureBackgroundMusic();
         }
 
         void OnDestroy()
         {
+            if (m_BackgroundMusicSource != null)
+                m_BackgroundMusicSource.Stop();
+
             if (m_MenuRoot == null)
                 return;
 
@@ -60,6 +69,37 @@ namespace CIS5680VRGame.UI
         {
             if (m_PlayerRig == null)
                 m_PlayerRig = FindObjectOfType<XROrigin>();
+        }
+
+        void EnsureBackgroundMusic()
+        {
+            if (!Application.isPlaying)
+                return;
+
+            if (m_BackgroundMusicSource == null)
+                m_BackgroundMusicSource = GetComponent<AudioSource>();
+
+            if (m_BackgroundMusicSource == null)
+                m_BackgroundMusicSource = gameObject.AddComponent<AudioSource>();
+
+            if (m_BackgroundMusicClip == null)
+                m_BackgroundMusicClip = Resources.Load<AudioClip>(MainMenuMusicClipPath);
+
+            if (m_BackgroundMusicClip == null)
+                return;
+
+            m_BackgroundMusicSource.playOnAwake = false;
+            m_BackgroundMusicSource.loop = true;
+            m_BackgroundMusicSource.spatialBlend = 0f;
+            m_BackgroundMusicSource.dopplerLevel = 0f;
+            m_BackgroundMusicSource.ignoreListenerPause = false;
+            m_BackgroundMusicSource.volume = Mathf.Clamp01(m_BackgroundMusicVolume);
+
+            if (m_BackgroundMusicSource.clip != m_BackgroundMusicClip)
+                m_BackgroundMusicSource.clip = m_BackgroundMusicClip;
+
+            if (!m_BackgroundMusicSource.isPlaying)
+                m_BackgroundMusicSource.Play();
         }
 
         void CreateMenuIfNeeded()
@@ -178,7 +218,8 @@ namespace CIS5680VRGame.UI
                 "New Game",
                 fontAsset,
                 new Color(0.12f, 0.68f, 0.98f, 0.96f),
-                ShowTutorialPrompt);
+                ShowTutorialPrompt,
+                UIButtonSoundStyle.Confirm);
 
             CreateButton(
                 "QuitButton",
@@ -186,7 +227,8 @@ namespace CIS5680VRGame.UI
                 "Quit",
                 fontAsset,
                 new Color(0.16f, 0.2f, 0.28f, 0.94f),
-                QuitGame);
+                QuitGame,
+                UIButtonSoundStyle.Cancel);
 
             m_TutorialPromptOverlay = ModalMenuPauseUtility.CreateUIObject("TutorialPromptOverlay", contentArea.transform);
             RectTransform promptOverlayRect = m_TutorialPromptOverlay.GetComponent<RectTransform>();
@@ -271,6 +313,7 @@ namespace CIS5680VRGame.UI
                 fontAsset,
                 new Color(0.12f, 0.68f, 0.98f, 0.96f),
                 LoadTutorial,
+                UIButtonSoundStyle.Confirm,
                 m_TutorialChoiceButtonFontSize,
                 m_TutorialChoiceButtonSize);
 
@@ -281,6 +324,7 @@ namespace CIS5680VRGame.UI
                 fontAsset,
                 new Color(0.16f, 0.2f, 0.28f, 0.94f),
                 LoadMainGameDirectly,
+                UIButtonSoundStyle.Normal,
                 m_TutorialChoiceButtonFontSize,
                 m_TutorialChoiceButtonSize);
 
@@ -291,6 +335,7 @@ namespace CIS5680VRGame.UI
                 fontAsset,
                 new Color(0.12f, 0.16f, 0.22f, 0.96f),
                 CancelTutorialPrompt,
+                UIButtonSoundStyle.Cancel,
                 m_TutorialCancelButtonFontSize,
                 m_TutorialCancelButtonSize);
 
@@ -453,6 +498,7 @@ namespace CIS5680VRGame.UI
             TMP_FontAsset fontAsset,
             Color backgroundColor,
             UnityEngine.Events.UnityAction onClick,
+            UIButtonSoundStyle soundStyle = UIButtonSoundStyle.Normal,
             float labelFontSize = 30f,
             Vector2? customSize = null)
         {
@@ -477,6 +523,7 @@ namespace CIS5680VRGame.UI
             colors.selectedColor = colors.highlightedColor;
             colors.disabledColor = new Color(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.45f);
             button.colors = colors;
+            UIButtonAudioFeedback.Attach(button, soundStyle);
             button.onClick.AddListener(onClick);
 
             GameObject textObject = ModalMenuPauseUtility.CreateUIObject("Label", buttonObject.transform);
@@ -513,14 +560,14 @@ namespace CIS5680VRGame.UI
         {
             Time.timeScale = 1f;
             AudioListener.pause = false;
-            SceneManager.LoadScene(m_TutorialSceneName);
+            SceneTransitionService.LoadScene(m_TutorialSceneName, m_BackgroundMusicSource);
         }
 
         void LoadMainGameDirectly()
         {
             Time.timeScale = 1f;
             AudioListener.pause = false;
-            SceneManager.LoadScene(m_GameplaySceneName);
+            SceneTransitionService.LoadScene(m_GameplaySceneName, m_BackgroundMusicSource);
         }
 
         void QuitGame()

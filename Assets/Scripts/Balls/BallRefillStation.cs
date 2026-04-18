@@ -99,7 +99,10 @@ namespace CIS5680VRGame.Balls
                 MarkVisited();
 
             if (refilledAny)
+            {
+                PulseAudioService.PlayResourceRestored();
                 m_NextRefillTime = Time.time + k_RefillRetryInterval;
+            }
         }
 
         void MarkVisited()

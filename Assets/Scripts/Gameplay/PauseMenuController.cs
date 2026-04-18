@@ -10,6 +10,7 @@ using XRCommonUsages = UnityEngine.XR.CommonUsages;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using CIS5680VRGame.UI;
 
 namespace CIS5680VRGame.Gameplay
 {
@@ -120,6 +121,7 @@ namespace CIS5680VRGame.Gameplay
 
             ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);
             ShowPauseMenu();
+            UIAudioService.PlayPauseOpen();
         }
 
         void ShowPauseMenu()
@@ -148,13 +150,13 @@ namespace CIS5680VRGame.Gameplay
         {
             ResumeGameplay();
             Scene activeScene = SceneManager.GetActiveScene();
-            SceneManager.LoadScene(activeScene.name);
+            SceneTransitionService.LoadScene(activeScene.name);
         }
 
         void ReturnToMainMenu()
         {
             ResumeGameplay();
-            SceneManager.LoadScene(m_MainMenuSceneName);
+            SceneTransitionService.LoadScene(m_MainMenuSceneName);
         }
 
         void QuitApplication()
@@ -269,7 +271,8 @@ namespace CIS5680VRGame.Gameplay
                 "Resume",
                 fontAsset,
                 new Color(0.12f, 0.68f, 0.98f, 0.96f),
-                ResumeGameplay);
+                ResumeGameplay,
+                UIButtonSoundStyle.Normal);
 
             CreateButton(
                 "RestartButton",
@@ -277,7 +280,8 @@ namespace CIS5680VRGame.Gameplay
                 "Restart Level",
                 fontAsset,
                 new Color(0.16f, 0.52f, 0.85f, 0.94f),
-                RestartLevel);
+                RestartLevel,
+                UIButtonSoundStyle.Normal);
 
             CreateButton(
                 "MainMenuButton",
@@ -285,7 +289,8 @@ namespace CIS5680VRGame.Gameplay
                 "Return to Main Menu",
                 fontAsset,
                 new Color(0.14f, 0.18f, 0.26f, 0.94f),
-                ReturnToMainMenu);
+                ReturnToMainMenu,
+                UIButtonSoundStyle.Normal);
 
             CreateButton(
                 "QuitButton",
@@ -293,7 +298,8 @@ namespace CIS5680VRGame.Gameplay
                 "Quit",
                 fontAsset,
                 new Color(0.2f, 0.12f, 0.14f, 0.94f),
-                QuitApplication);
+                QuitApplication,
+                UIButtonSoundStyle.Cancel);
 
             ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, m_PanelRect);
             m_MenuRoot.SetActive(false);
@@ -363,7 +369,8 @@ namespace CIS5680VRGame.Gameplay
             string label,
             TMP_FontAsset fontAsset,
             Color backgroundColor,
-            UnityEngine.Events.UnityAction onClick)
+            UnityEngine.Events.UnityAction onClick,
+            UIButtonSoundStyle soundStyle = UIButtonSoundStyle.Normal)
         {
             GameObject buttonObject = ModalMenuPauseUtility.CreateUIObject(name, parent);
             RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
@@ -385,6 +392,7 @@ namespace CIS5680VRGame.Gameplay
             colors.selectedColor = colors.highlightedColor;
             colors.disabledColor = new Color(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.45f);
             button.colors = colors;
+            UIButtonAudioFeedback.Attach(button, soundStyle);
             button.onClick.AddListener(onClick);
 
             GameObject textObject = ModalMenuPauseUtility.CreateUIObject("Label", buttonObject.transform);

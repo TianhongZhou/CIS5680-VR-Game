@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
+using CIS5680VRGame.Gameplay;
 
 namespace CIS5680VRGame.Balls
 {
@@ -125,6 +126,7 @@ namespace CIS5680VRGame.Balls
 
             Vector3 pulseOrigin = transform.position - surfaceNormal * m_StickSurfaceOffset;
             m_PulseManager.SpawnPulse(pulseOrigin, surfaceNormal, m_PulseRadius, m_StuckSurfaceCollider);
+            PulseAudioService.PlayPulse(pulseOrigin);
         }
     }
 }
