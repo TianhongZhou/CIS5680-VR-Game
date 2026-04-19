@@ -283,8 +283,8 @@ namespace CIS5680VRGame.Gameplay
 
         void RefreshMarkers(bool forceRebuild = false)
         {
-            var stations = FindObjectsOfType<BallRefillStation>(true);
-            var goals = FindObjectsOfType<LevelGoalTrigger>(true);
+            var stations = FindActiveObjects<BallRefillStation>();
+            var goals = FindActiveObjects<LevelGoalTrigger>();
             int targetCount = stations.Length + goals.Length;
 
             if (!forceRebuild && targetCount == m_LocatorMarkers.Count)
@@ -1029,6 +1029,23 @@ namespace CIS5680VRGame.Gameplay
                 DestroyImmediate(primitive);
 
             return mesh;
+        }
+
+        static T[] FindActiveObjects<T>() where T : Component
+        {
+            var allObjects = FindObjectsOfType<T>(true);
+            var activeObjects = new List<T>(allObjects.Length);
+
+            for (int i = 0; i < allObjects.Length; i++)
+            {
+                T item = allObjects[i];
+                if (item == null || !item.gameObject.activeInHierarchy)
+                    continue;
+
+                activeObjects.Add(item);
+            }
+
+            return activeObjects.ToArray();
         }
     }
 }

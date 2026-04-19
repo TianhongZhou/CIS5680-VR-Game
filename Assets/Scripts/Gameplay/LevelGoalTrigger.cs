@@ -27,6 +27,11 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Vector2 m_MenuSize = new(900f, 540f);
         [SerializeField] Vector2 m_ButtonSize = new(240f, 84f);
         [SerializeField] string m_MainMenuSceneName = "MainMenu";
+        [Header("Next Level")]
+        [SerializeField] bool m_EnableNextLevelButton = true;
+        [SerializeField] string m_ShowNextLevelButtonOnSceneName = "Maze1";
+        [SerializeField] string m_NextLevelSceneName = "random-maze";
+        [SerializeField] string m_NextLevelButtonLabel = "Enter New Level";
 
         Collider m_Trigger;
         MaterialPropertyBlock m_PropertyBlock;
@@ -173,6 +178,19 @@ namespace CIS5680VRGame.Gameplay
                 new Color(0.72f, 0.88f, 0.98f, 1f),
                 84f);
 
+            if (ShouldShowNextLevelButton())
+            {
+                CreateButton(
+                    "NextLevelButton",
+                    panel.transform,
+                    m_NextLevelButtonLabel,
+                    fontAsset,
+                    new Color(0.18f, 0.72f, 0.42f, 0.94f),
+                    LoadNextLevelScene,
+                    UIButtonSoundStyle.Normal,
+                    28f);
+            }
+
             GameObject buttonRow = CreateUIObject("Buttons", panel.transform);
             HorizontalLayoutGroup buttonLayout = buttonRow.AddComponent<HorizontalLayoutGroup>();
             buttonLayout.spacing = 28f;
@@ -293,6 +311,24 @@ namespace CIS5680VRGame.Gameplay
             buttonLabel.color = Color.white;
             buttonLabel.alignment = TextAlignmentOptions.Center;
             buttonLabel.enableWordWrapping = false;
+        }
+
+        bool ShouldShowNextLevelButton()
+        {
+            if (!m_EnableNextLevelButton || string.IsNullOrWhiteSpace(m_NextLevelSceneName))
+                return false;
+
+            if (string.IsNullOrWhiteSpace(m_ShowNextLevelButtonOnSceneName))
+                return true;
+
+            Scene activeScene = SceneManager.GetActiveScene();
+            return string.Equals(activeScene.name, m_ShowNextLevelButtonOnSceneName, System.StringComparison.Ordinal);
+        }
+
+        void LoadNextLevelScene()
+        {
+            ModalMenuPauseUtility.ResumeGameplayAfterMenu();
+            SceneTransitionService.LoadScene(m_NextLevelSceneName);
         }
 
         void RestartLevel()
