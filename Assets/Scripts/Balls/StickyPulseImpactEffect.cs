@@ -1,4 +1,5 @@
 using System.Collections;
+using CIS5680VRGame.Progression;
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using CIS5680VRGame.Gameplay;
@@ -13,6 +14,10 @@ namespace CIS5680VRGame.Balls
         [SerializeField] int m_PulseCount = 3;
         [SerializeField] float m_StickSurfaceOffset = 0.02f;
         [SerializeField] float m_DestroyDelayAfterLastPulse = 0.75f;
+        float m_BasePulseRadius;
+        int m_PersistentPulseRadiusBonusPercent;
+        int m_SingleRunPulseRadiusBonusPercent;
+        int m_PersistentExtraPulseCount;
 
         Rigidbody m_Rigidbody;
         Collider[] m_Colliders;
@@ -24,6 +29,7 @@ namespace CIS5680VRGame.Balls
 
         void Awake()
         {
+            m_BasePulseRadius = m_PulseRadius;
             m_Rigidbody = GetComponent<Rigidbody>();
             m_Colliders = GetComponents<Collider>();
             m_GrabInteractable = GetComponent<XRGrabInteractable>();
@@ -31,6 +37,8 @@ namespace CIS5680VRGame.Balls
 
             if (m_PulseManager == null)
                 m_PulseManager = FindObjectOfType<PulseManager>();
+
+            ApplyPersistentPulseRadiusBonusPercent(ResolveProfilePulseRadiusBonusPercent());
         }
 
         void OnDisable()
@@ -97,6 +105,7 @@ namespace CIS5680VRGame.Balls
         IEnumerator EmitPulses()
         {
             int pulseCount = Mathf.Max(1, m_PulseCount);
+            pulseCount += Mathf.Max(0, m_PersistentExtraPulseCount);
             float pulseInterval = Mathf.Max(0.01f, m_PulseInterval);
 
             for (int i = 0; i < pulseCount; i++)
@@ -127,6 +136,37 @@ namespace CIS5680VRGame.Balls
             Vector3 pulseOrigin = transform.position - surfaceNormal * m_StickSurfaceOffset;
             m_PulseManager.SpawnPulse(pulseOrigin, surfaceNormal, m_PulseRadius, m_StuckSurfaceCollider);
             PulseAudioService.PlayPulse(pulseOrigin);
+        }
+
+        public void ApplyPersistentPulseRadiusBonusPercent(int bonusPercent)
+        {
+            m_PersistentPulseRadiusBonusPercent = Mathf.Max(0, bonusPercent);
+            RecomputePulseRadius();
+        }
+
+        public void ApplySingleRunPulseRadiusBonusPercent(int bonusPercent)
+        {
+            m_SingleRunPulseRadiusBonusPercent = Mathf.Max(0, bonusPercent);
+            RecomputePulseRadius();
+        }
+
+        public void ApplyPersistentExtraPulseCount(int extraPulseCount)
+        {
+            m_PersistentExtraPulseCount = Mathf.Max(0, extraPulseCount);
+        }
+
+        static int ResolveProfilePulseRadiusBonusPercent()
+        {
+            return ProfileService.TryGetCurrentProfile(out ProfileSaveData profile) && profile != null
+                ? ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.PulseRadiusBonusPercent)
+                : 0;
+        }
+
+        void RecomputePulseRadius()
+        {
+            float persistentMultiplier = 1f + Mathf.Max(0, m_PersistentPulseRadiusBonusPercent) / 100f;
+            float singleRunMultiplier = 1f + Mathf.Max(0, m_SingleRunPulseRadiusBonusPercent) / 100f;
+            m_PulseRadius = Mathf.Max(0.1f, m_BasePulseRadius * persistentMultiplier * singleRunMultiplier);
         }
     }
 }

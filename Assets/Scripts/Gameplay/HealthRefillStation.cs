@@ -13,19 +13,33 @@ namespace CIS5680VRGame.Gameplay
     [RequireComponent(typeof(XRSimpleInteractable))]
     public class HealthRefillStation : MonoBehaviour
     {
+        static class SharedDefaults
+        {
+            public const int MaxUses = 2;
+            public const float BaseRestoreAmount = 50f;
+            public const float Cooldown = 20f;
+        }
+
         [SerializeField] PlayerHealth m_PlayerHealth;
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] PulseRevealVisual m_PulseVisual;
         [SerializeField] Light m_GlowLight;
-        [SerializeField] float m_Cooldown = 5f;
+        [SerializeField] bool m_OverrideSharedDefaults;
+        [SerializeField, Min(1)] int m_MaxUses = SharedDefaults.MaxUses;
+        [SerializeField] float m_BaseRestoreAmount = SharedDefaults.BaseRestoreAmount;
+        [SerializeField] float m_Cooldown = SharedDefaults.Cooldown;
         [SerializeField] Color m_ReadyBackgroundColor = new(0.02f, 0.14f, 0.05f, 1f);
         [SerializeField] Color m_ReadyPulseColor = new(0.38f, 1f, 0.46f, 1f);
         [SerializeField] Color m_CooldownBackgroundColor = new(0.05f, 0.05f, 0.05f, 1f);
         [SerializeField] Color m_CooldownPulseColor = new(0.26f, 0.28f, 0.28f, 1f);
+        [SerializeField] Color m_DepletedBackgroundColor = new(0.12f, 0.03f, 0.03f, 1f);
+        [SerializeField] Color m_DepletedPulseColor = new(0.8f, 0.24f, 0.18f, 1f);
         [SerializeField] float m_ReadyEmissionStrength = 3.2f;
         [SerializeField] float m_CooldownEmissionStrength = 1.2f;
+        [SerializeField] float m_DepletedEmissionStrength = 0.75f;
         [SerializeField] float m_ReadyLightIntensity = 1.45f;
         [SerializeField] float m_CooldownLightIntensity = 0.25f;
+        [SerializeField] float m_DepletedLightIntensity = 0.12f;
         [SerializeField] float m_LightPulseAmplitude = 0.22f;
         [SerializeField] float m_LightPulseFrequency = 2.2f;
         [SerializeField] float m_UseHapticsAmplitude = 0.3f;
@@ -36,11 +50,13 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] float m_HoverPromptFontSize = 56f;
         [SerializeField] Color m_HoverPromptReadyColor = new(0.92f, 1f, 0.94f, 1f);
         [SerializeField] Color m_HoverPromptCooldownColor = new(1f, 0.62f, 0.24f, 1f);
+        [SerializeField] Color m_HoverPromptDepletedColor = new(1f, 0.44f, 0.4f, 1f);
         [SerializeField] Color m_HoverPromptOutlineColor = new(0f, 0f, 0f, 0.88f);
         [SerializeField] Color m_HoverPromptPanelColor = new(0.03f, 0.04f, 0.04f, 0.88f);
         [SerializeField] Color m_HoverPromptPanelBorderColor = new(0.86f, 0.96f, 0.9f, 0.92f);
         [SerializeField] string m_ReadyPromptText = "Press Grip to Restore Health";
         [SerializeField] string m_CooldownPromptFormat = "Recharging... {0:0.0}s";
+        [SerializeField] string m_DepletedPromptText = "Health station depleted";
         [SerializeField] Transform m_OrbVisualRoot;
         [SerializeField] Color m_CooldownWarningBackgroundColor = new(0.12f, 0.02f, 0.02f, 1f);
         [SerializeField] Color m_CooldownWarningPulseColorA = new(0.62f, 0.1f, 0.08f, 1f);
@@ -59,11 +75,62 @@ namespace CIS5680VRGame.Gameplay
         TextMeshProUGUI m_HoverPromptText;
         Transform m_PromptFaceTarget;
         Vector3 m_OrbBaseLocalScale = Vector3.one;
+        int m_PersistentRestoreBonusPercent;
+        int m_PersistentUseBonus;
+        int m_PersistentCooldownReductionPercent;
+        int m_SingleRunUsePenalty;
+        int m_SingleRunRestoreMultiplierPercent = 100;
+        int m_UsesRemaining;
 
-        public bool IsReady => Time.time >= m_CooldownEndsAt;
+        public int MaxUses => Mathf.Max(1, m_MaxUses + Mathf.Max(0, m_PersistentUseBonus) - Mathf.Max(0, m_SingleRunUsePenalty));
+        public int UsesRemaining => Mathf.Max(0, m_UsesRemaining);
+        public bool IsDepleted => UsesRemaining <= 0;
+        public bool IsReady => !IsDepleted && Time.time >= m_CooldownEndsAt;
+        public bool IsLocatorAvailable => !IsDepleted;
+
+        public void SetPersistentRestoreBonusPercent(int bonusPercent)
+        {
+            m_PersistentRestoreBonusPercent = Mathf.Max(0, bonusPercent);
+        }
+
+        public void SetPersistentUseBonus(int bonusUses)
+        {
+            int previousMaxUses = MaxUses;
+            m_PersistentUseBonus = Mathf.Max(0, bonusUses);
+            AdjustRemainingUses(previousMaxUses, MaxUses);
+        }
+
+        public void SetSingleRunUsePenalty(int penaltyUses)
+        {
+            int previousMaxUses = MaxUses;
+            m_SingleRunUsePenalty = Mathf.Max(0, penaltyUses);
+            AdjustRemainingUses(previousMaxUses, MaxUses);
+        }
+
+        public void SetPersistentCooldownReductionPercent(int reductionPercent)
+        {
+            m_PersistentCooldownReductionPercent = Mathf.Clamp(reductionPercent, 0, 90);
+        }
+
+        public void SetSingleRunRestoreMultiplierPercent(int multiplierPercent)
+        {
+            m_SingleRunRestoreMultiplierPercent = Mathf.Clamp(multiplierPercent, 1, 1000);
+        }
+
+        void Reset()
+        {
+            ApplySharedDefaults();
+        }
+
+        void OnValidate()
+        {
+            ApplySharedDefaults();
+        }
 
         void Awake()
         {
+            ApplySharedDefaults();
+
             m_Interactable = GetComponent<XRSimpleInteractable>();
 
             if (m_PlayerHealth == null)
@@ -84,6 +151,7 @@ namespace CIS5680VRGame.Gameplay
             if (m_OrbVisualRoot != null)
                 m_OrbBaseLocalScale = m_OrbVisualRoot.localScale;
 
+            m_UsesRemaining = MaxUses;
             ResolvePromptFaceTarget();
             UpdateVisualState();
         }
@@ -151,10 +219,15 @@ namespace CIS5680VRGame.Gameplay
             if (!CanUse(args.interactorObject) || !IsReady || m_PlayerHealth == null)
                 return;
 
-            if (!m_PlayerHealth.RestoreToMax())
+            if (!m_PlayerHealth.RestoreAmount(GetEffectiveRestoreAmount(), HealthChangeReason.RefillStation))
                 return;
 
-            m_CooldownEndsAt = Time.time + Mathf.Max(0.1f, m_Cooldown);
+            m_UsesRemaining = Mathf.Max(0, m_UsesRemaining - 1);
+            if (!IsDepleted)
+                m_CooldownEndsAt = Time.time + GetEffectiveCooldown();
+            else
+                m_CooldownEndsAt = -999f;
+
             PulseAudioService.PlayResourceRestored();
 
             if (args.interactorObject is UnityEngine.XR.Interaction.Toolkit.Interactors.XRBaseInputInteractor inputInteractor)
@@ -162,6 +235,20 @@ namespace CIS5680VRGame.Gameplay
 
             UpdateVisualState();
             UpdateHoverPrompt();
+        }
+
+        float GetEffectiveRestoreAmount()
+        {
+            float persistentMultiplier = 1f + Mathf.Max(0, m_PersistentRestoreBonusPercent) / 100f;
+            float singleRunMultiplier = Mathf.Clamp(m_SingleRunRestoreMultiplierPercent, 1, 1000) / 100f;
+            float multiplier = persistentMultiplier * singleRunMultiplier;
+            return Mathf.Max(1f, m_BaseRestoreAmount * multiplier);
+        }
+
+        float GetEffectiveCooldown()
+        {
+            float multiplier = 1f - (Mathf.Clamp(m_PersistentCooldownReductionPercent, 0, 90) / 100f);
+            return Mathf.Max(0.1f, m_Cooldown * multiplier);
         }
 
         bool CanUse(UnityEngine.XR.Interaction.Toolkit.Interactors.IXRSelectInteractor interactor)
@@ -184,7 +271,22 @@ namespace CIS5680VRGame.Gameplay
 
         void UpdateVisualState()
         {
-            float readiness = Mathf.Clamp01((Mathf.Max(0f, m_Cooldown - Mathf.Max(0f, m_CooldownEndsAt - Time.time))) / Mathf.Max(0.01f, m_Cooldown));
+            if (IsDepleted)
+            {
+                ApplyOrbScale(1f);
+                m_PulseVisual?.SetVisual(m_DepletedBackgroundColor, m_DepletedPulseColor, m_DepletedEmissionStrength);
+
+                if (m_GlowLight != null)
+                {
+                    m_GlowLight.color = m_DepletedPulseColor;
+                    m_GlowLight.intensity = m_DepletedLightIntensity;
+                }
+
+                return;
+            }
+
+            float effectiveCooldown = GetEffectiveCooldown();
+            float readiness = Mathf.Clamp01((Mathf.Max(0f, effectiveCooldown - Mathf.Max(0f, m_CooldownEndsAt - Time.time))) / Mathf.Max(0.01f, effectiveCooldown));
             if (IsReady)
                 readiness = 1f;
 
@@ -247,12 +349,20 @@ namespace CIS5680VRGame.Gameplay
 
             float remaining = Mathf.Max(0f, m_CooldownEndsAt - Time.time);
             float cooldownFlash = 0.5f + 0.5f * Mathf.Sin(Time.time * Mathf.Max(0.01f, m_CooldownWarningFlashFrequency) * Mathf.PI * 2f);
-            m_HoverPromptText.text = IsReady
-                ? m_ReadyPromptText
-                : string.Format(m_CooldownPromptFormat, remaining);
-            m_HoverPromptText.color = IsReady
-                ? m_HoverPromptReadyColor
-                : Color.Lerp(m_HoverPromptCooldownColor * 0.72f, m_HoverPromptCooldownColor, cooldownFlash);
+            if (IsDepleted)
+            {
+                m_HoverPromptText.text = m_DepletedPromptText;
+                m_HoverPromptText.color = m_HoverPromptDepletedColor;
+            }
+            else
+            {
+                m_HoverPromptText.text = IsReady
+                    ? m_ReadyPromptText
+                    : string.Format(m_CooldownPromptFormat, remaining);
+                m_HoverPromptText.color = IsReady
+                    ? m_HoverPromptReadyColor
+                    : Color.Lerp(m_HoverPromptCooldownColor * 0.72f, m_HoverPromptCooldownColor, cooldownFlash);
+            }
 
             Transform promptTransform = m_HoverPromptRect;
             promptTransform.position = transform.TransformPoint(m_HoverPromptLocalOffset);
@@ -349,6 +459,31 @@ namespace CIS5680VRGame.Gameplay
             {
                 m_OrbVisualRoot.localScale = m_OrbBaseLocalScale * Mathf.Max(0.01f, scaleMultiplier);
             }
+        }
+
+        void ApplySharedDefaults()
+        {
+            if (m_OverrideSharedDefaults)
+                return;
+
+            m_MaxUses = SharedDefaults.MaxUses;
+            m_BaseRestoreAmount = SharedDefaults.BaseRestoreAmount;
+            m_Cooldown = SharedDefaults.Cooldown;
+        }
+
+        void AdjustRemainingUses(int previousMaxUses, int newMaxUses)
+        {
+            if (m_UsesRemaining <= 0)
+                return;
+
+            if (m_UsesRemaining >= previousMaxUses)
+            {
+                m_UsesRemaining = newMaxUses;
+                return;
+            }
+
+            int usesSpent = Mathf.Max(0, previousMaxUses - m_UsesRemaining);
+            m_UsesRemaining = Mathf.Clamp(newMaxUses - usesSpent, 0, newMaxUses);
         }
     }
 }

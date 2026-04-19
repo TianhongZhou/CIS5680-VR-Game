@@ -31,12 +31,23 @@ namespace CIS5680VRGame.Gameplay
 
     public class PlayerEnergy : MonoBehaviour
     {
-        [SerializeField] int m_MaxEnergy = 100;
-        [SerializeField] int m_StartingEnergy = 80;
-        [SerializeField] int m_RegenAmount = 1;
-        [SerializeField] float m_RegenInterval = 3f;
-        [SerializeField] float m_RefillDuration = 0.6f;
-        [SerializeField] float m_InsufficientSignalCooldown = 0.2f;
+        static class SharedDefaults
+        {
+            public const int MaxEnergy = 100;
+            public const int StartingEnergy = 50;
+            public const int RegenAmount = 1;
+            public const float RegenInterval = 3f;
+            public const float RefillDuration = 0.6f;
+            public const float InsufficientSignalCooldown = 0.2f;
+        }
+
+        [SerializeField] bool m_OverrideSharedDefaults;
+        [SerializeField] int m_MaxEnergy = SharedDefaults.MaxEnergy;
+        [SerializeField] int m_StartingEnergy = SharedDefaults.StartingEnergy;
+        [SerializeField] int m_RegenAmount = SharedDefaults.RegenAmount;
+        [SerializeField] float m_RegenInterval = SharedDefaults.RegenInterval;
+        [SerializeField] float m_RefillDuration = SharedDefaults.RefillDuration;
+        [SerializeField] float m_InsufficientSignalCooldown = SharedDefaults.InsufficientSignalCooldown;
 
         int m_CurrentEnergy;
         float m_CurrentEnergyValue;
@@ -46,6 +57,9 @@ namespace CIS5680VRGame.Gameplay
         float m_RefillStartEnergyValue;
         float m_RefillTargetEnergyValue;
         float m_RefillElapsed;
+        int m_BaseMaxEnergy;
+        int m_BaseStartingEnergy;
+        float m_BaseRegenInterval;
 
         public event Action<int, int> EnergyChanged;
         public event Action<EnergyChangeContext> EnergyChangedDetailed;
@@ -57,9 +71,24 @@ namespace CIS5680VRGame.Gameplay
         public float NormalizedEnergy => MaxEnergy <= 0 ? 0f : Mathf.Clamp01(m_CurrentEnergyValue / MaxEnergy);
         public bool IsRefillInProgress => m_IsRefillInProgress;
 
+        void Reset()
+        {
+            ApplySharedDefaults();
+        }
+
+        void OnValidate()
+        {
+            ApplySharedDefaults();
+        }
+
         void Awake()
         {
+            ApplySharedDefaults();
+
             m_MaxEnergy = Mathf.Max(1, m_MaxEnergy);
+            m_BaseMaxEnergy = m_MaxEnergy;
+            m_BaseStartingEnergy = Mathf.Clamp(m_StartingEnergy, 0, m_MaxEnergy);
+            m_BaseRegenInterval = Mathf.Max(0.01f, m_RegenInterval);
             m_CurrentEnergyValue = Mathf.Clamp(m_StartingEnergy, 0f, m_MaxEnergy);
             m_CurrentEnergy = Mathf.Clamp(Mathf.FloorToInt(m_CurrentEnergyValue + 0.0001f), 0, m_MaxEnergy);
             m_RegenAmount = Mathf.Max(0, m_RegenAmount);
@@ -136,6 +165,21 @@ namespace CIS5680VRGame.Gameplay
             return true;
         }
 
+        public bool RestoreAmount(float amount, EnergyChangeReason reason = EnergyChangeReason.RefillStation)
+        {
+            if (amount <= 0f || m_IsRefillInProgress || m_CurrentEnergyValue >= m_MaxEnergy - 0.0001f)
+                return false;
+
+            m_IsRefillInProgress = true;
+            m_RefillStartEnergyValue = m_CurrentEnergyValue;
+            m_RefillTargetEnergyValue = Mathf.Clamp(m_CurrentEnergyValue + amount, 0f, m_MaxEnergy);
+            m_RefillElapsed = 0f;
+            m_RegenTimer = 0f;
+            RefillStarted?.Invoke();
+            NotifyEnergyChanged(reason, m_CurrentEnergy);
+            return true;
+        }
+
         void UpdateRefill()
         {
             if (!m_IsRefillInProgress)
@@ -181,10 +225,77 @@ namespace CIS5680VRGame.Gameplay
             NotifyEnergyChanged(reason, previous);
         }
 
+        public void ApplyPersistentMaxEnergyBonus(int bonusAmount, bool restoreToFull = true)
+        {
+            int clampedBonus = Mathf.Max(0, bonusAmount);
+            int targetMaxEnergy = Mathf.Max(1, m_BaseMaxEnergy + clampedBonus);
+            int targetStartingEnergy = Mathf.Clamp(m_StartingEnergy, 0, targetMaxEnergy);
+            bool changed = targetMaxEnergy != m_MaxEnergy || targetStartingEnergy != m_StartingEnergy;
+
+            CancelRefill();
+            m_MaxEnergy = targetMaxEnergy;
+            m_StartingEnergy = targetStartingEnergy;
+
+            if (!changed && !restoreToFull)
+                return;
+
+            int previousEnergy = m_CurrentEnergy;
+            float nextEnergyValue = restoreToFull
+                ? m_MaxEnergy
+                : Mathf.Clamp(m_CurrentEnergyValue, 0f, m_MaxEnergy);
+
+            m_CurrentEnergyValue = nextEnergyValue;
+            m_CurrentEnergy = Mathf.Clamp(Mathf.FloorToInt(m_CurrentEnergyValue + 0.0001f), 0, m_MaxEnergy);
+            m_RegenTimer = 0f;
+            NotifyEnergyChanged(EnergyChangeReason.DirectSet, previousEnergy);
+        }
+
+        public void ApplyPersistentStartingEnergyBonus(int bonusAmount, bool applyToCurrentEnergy = true)
+        {
+            int clampedBonus = Mathf.Max(0, bonusAmount);
+            int targetStartingEnergy = Mathf.Clamp(m_BaseStartingEnergy + clampedBonus, 0, m_MaxEnergy);
+            bool changed = targetStartingEnergy != m_StartingEnergy;
+
+            CancelRefill();
+            m_StartingEnergy = targetStartingEnergy;
+
+            if (!changed && !applyToCurrentEnergy)
+                return;
+
+            int previousEnergy = m_CurrentEnergy;
+            float nextEnergyValue = applyToCurrentEnergy
+                ? m_StartingEnergy
+                : Mathf.Clamp(m_CurrentEnergyValue, 0f, m_MaxEnergy);
+
+            m_CurrentEnergyValue = nextEnergyValue;
+            m_CurrentEnergy = Mathf.Clamp(Mathf.FloorToInt(m_CurrentEnergyValue + 0.0001f), 0, m_MaxEnergy);
+            m_RegenTimer = 0f;
+            NotifyEnergyChanged(EnergyChangeReason.DirectSet, previousEnergy);
+        }
+
+        public void ApplyPersistentEnergyRegenIntervalReductionPercent(int reductionPercent)
+        {
+            float multiplier = 1f - Mathf.Clamp(reductionPercent, 0, 80) / 100f;
+            m_RegenInterval = Mathf.Max(0.25f, m_BaseRegenInterval * multiplier);
+        }
+
         void NotifyEnergyChanged(EnergyChangeReason reason, int previousEnergy)
         {
             EnergyChanged?.Invoke(m_CurrentEnergy, m_MaxEnergy);
             EnergyChangedDetailed?.Invoke(new EnergyChangeContext(previousEnergy, m_CurrentEnergy, m_MaxEnergy, reason));
+        }
+
+        void ApplySharedDefaults()
+        {
+            if (m_OverrideSharedDefaults)
+                return;
+
+            m_MaxEnergy = SharedDefaults.MaxEnergy;
+            m_StartingEnergy = SharedDefaults.StartingEnergy;
+            m_RegenAmount = SharedDefaults.RegenAmount;
+            m_RegenInterval = SharedDefaults.RegenInterval;
+            m_RefillDuration = SharedDefaults.RefillDuration;
+            m_InsufficientSignalCooldown = SharedDefaults.InsufficientSignalCooldown;
         }
     }
 }

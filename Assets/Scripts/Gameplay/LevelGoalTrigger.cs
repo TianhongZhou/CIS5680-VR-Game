@@ -6,6 +6,8 @@ using TMPro;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using CIS5680VRGame.Generation;
+using CIS5680VRGame.Progression;
 using CIS5680VRGame.UI;
 
 namespace CIS5680VRGame.Gameplay
@@ -32,11 +34,28 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] string m_ShowNextLevelButtonOnSceneName = "Maze1";
         [SerializeField] string m_NextLevelSceneName = "random-maze";
         [SerializeField] string m_NextLevelButtonLabel = "Enter New Level";
+        [Header("Random Maze Restart")]
+        [SerializeField] bool m_EnableGenerateNewMapButton = true;
+        [SerializeField] string m_ShowGenerateNewMapButtonOnSceneName = "random-maze";
+        [SerializeField] string m_GenerateNewMapButtonLabel = "Generate New Map";
+        [Header("Shop")]
+        [SerializeField] bool m_EnableEnterShopButton = true;
+        [SerializeField] string m_ShowEnterShopButtonOnSceneName = "random-maze";
+        [SerializeField] string m_ShopSceneName = "ShopScene";
+        [SerializeField] string m_EnterShopButtonLabel = "Enter Shop";
+        [Header("Profile Save")]
+        [SerializeField] string m_SaveProfileOnCompletionSceneName = "random-maze";
+        [Header("Gold Settlement")]
+        [SerializeField] bool m_ShowGoldSettlementOnCompletion = true;
+        [SerializeField] Color m_GoldSettlementPrimaryColor = new(0.98f, 0.84f, 0.32f, 1f);
+        [SerializeField] Color m_GoldSettlementSecondaryColor = new(0.9f, 0.95f, 1f, 1f);
 
         Collider m_Trigger;
         MaterialPropertyBlock m_PropertyBlock;
         GameObject m_MenuRoot;
         MovementModeManager m_MovementModeManager;
+        bool m_HasGoldSettlementSummary;
+        RandomMazeGoldSettlementSummary m_GoldSettlementSummary;
 
         public bool HasCompleted { get; private set; }
 
@@ -66,6 +85,7 @@ namespace CIS5680VRGame.Gameplay
             ApplyCompletedVisualState();
             SetCompletionObjectsActive(true);
             PulseAudioService.PlayLevelComplete(1f);
+            SaveProfileIfNeeded();
             ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);
             ShowCompletionMenu();
 
@@ -178,6 +198,29 @@ namespace CIS5680VRGame.Gameplay
                 new Color(0.72f, 0.88f, 0.98f, 1f),
                 84f);
 
+            if (ShouldShowGoldSettlementSummary())
+            {
+                CreateLabel(
+                    "RunGoldSummary",
+                    panel.transform,
+                    $"Gold Collected This Run: +{m_GoldSettlementSummary.RunGoldEarned}",
+                    fontAsset,
+                    30f,
+                    FontStyles.Bold,
+                    m_GoldSettlementPrimaryColor,
+                    62f);
+
+                CreateLabel(
+                    "TotalGoldSummary",
+                    panel.transform,
+                    $"Total Gold: {m_GoldSettlementSummary.TotalGoldAfterDeposit}",
+                    fontAsset,
+                    26f,
+                    FontStyles.Normal,
+                    m_GoldSettlementSecondaryColor,
+                    52f);
+            }
+
             if (ShouldShowNextLevelButton())
             {
                 CreateButton(
@@ -189,6 +232,32 @@ namespace CIS5680VRGame.Gameplay
                     LoadNextLevelScene,
                     UIButtonSoundStyle.Normal,
                     28f);
+            }
+
+            if (ShouldShowGenerateNewMapButton())
+            {
+                CreateButton(
+                    "GenerateNewMapButton",
+                    panel.transform,
+                    m_GenerateNewMapButtonLabel,
+                    fontAsset,
+                    new Color(0.76f, 0.54f, 0.18f, 0.94f),
+                    GenerateNewMapAndRestartLevel,
+                    UIButtonSoundStyle.Normal,
+                    26f);
+            }
+
+            if (ShouldShowEnterShopButton())
+            {
+                CreateButton(
+                    "EnterShopButton",
+                    panel.transform,
+                    m_EnterShopButtonLabel,
+                    fontAsset,
+                    new Color(0.62f, 0.34f, 0.82f, 0.94f),
+                    LoadShopScene,
+                    UIButtonSoundStyle.Confirm,
+                    26f);
             }
 
             GameObject buttonRow = CreateUIObject("Buttons", panel.transform);
@@ -325,16 +394,82 @@ namespace CIS5680VRGame.Gameplay
             return string.Equals(activeScene.name, m_ShowNextLevelButtonOnSceneName, System.StringComparison.Ordinal);
         }
 
+        bool ShouldShowGenerateNewMapButton()
+        {
+            if (!m_EnableGenerateNewMapButton)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(m_ShowGenerateNewMapButtonOnSceneName))
+                return true;
+
+            Scene activeScene = SceneManager.GetActiveScene();
+            return string.Equals(activeScene.name, m_ShowGenerateNewMapButtonOnSceneName, System.StringComparison.Ordinal);
+        }
+
+        bool ShouldShowEnterShopButton()
+        {
+            if (!m_EnableEnterShopButton || string.IsNullOrWhiteSpace(m_ShopSceneName))
+                return false;
+
+            if (string.IsNullOrWhiteSpace(m_ShowEnterShopButtonOnSceneName))
+                return true;
+
+            Scene activeScene = SceneManager.GetActiveScene();
+            return string.Equals(activeScene.name, m_ShowEnterShopButtonOnSceneName, System.StringComparison.Ordinal);
+        }
+
+        void SaveProfileIfNeeded()
+        {
+            m_HasGoldSettlementSummary = false;
+            m_GoldSettlementSummary = default;
+
+            if (string.IsNullOrWhiteSpace(m_SaveProfileOnCompletionSceneName))
+                return;
+
+            Scene activeScene = SceneManager.GetActiveScene();
+            if (!string.Equals(activeScene.name, m_SaveProfileOnCompletionSceneName, System.StringComparison.Ordinal))
+                return;
+
+            if (RandomMazeGoldRunService.TryCompleteActiveRunAndSave(out RandomMazeGoldSettlementSummary settlementSummary))
+            {
+                m_HasGoldSettlementSummary = true;
+                m_GoldSettlementSummary = settlementSummary;
+                return;
+            }
+
+            ProfileService.RecordRandomMazeEscapeAndSave();
+        }
+
+        bool ShouldShowGoldSettlementSummary()
+        {
+            return m_ShowGoldSettlementOnCompletion && m_HasGoldSettlementSummary;
+        }
+
         void LoadNextLevelScene()
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
             SceneTransitionService.LoadScene(m_NextLevelSceneName);
         }
 
+        void GenerateNewMapAndRestartLevel()
+        {
+            ModalMenuPauseUtility.ResumeGameplayAfterMenu();
+            Scene activeScene = SceneManager.GetActiveScene();
+            RandomMazeRestartUtility.TryPrepareNewMapRestart(activeScene, out _);
+            SceneTransitionService.LoadScene(activeScene.name);
+        }
+
+        void LoadShopScene()
+        {
+            ModalMenuPauseUtility.ResumeGameplayAfterMenu();
+            SceneTransitionService.LoadScene(m_ShopSceneName);
+        }
+
         void RestartLevel()
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
             Scene activeScene = SceneManager.GetActiveScene();
+            RandomMazeRestartUtility.TryPrepareSameMapRestart(activeScene);
             SceneTransitionService.LoadScene(activeScene.name);
         }
 

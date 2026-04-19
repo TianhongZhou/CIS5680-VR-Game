@@ -1,4 +1,5 @@
 using System;
+using CIS5680VRGame.UI;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 
@@ -96,7 +97,7 @@ namespace CIS5680VRGame.Gameplay
             var context = new RewardCollectionContext(this, m_RewardType, Amount, transform.position);
             m_ResolvedSink?.HandleRewardCollected(context);
             RewardCollected?.Invoke(context);
-            PulseAudioService.PlayResourceRestored();
+            UIAudioService.PlayClick(UIButtonSoundStyle.Confirm);
 
             if (m_LogCollection)
             {

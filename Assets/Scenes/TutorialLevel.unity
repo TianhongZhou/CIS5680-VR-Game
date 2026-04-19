@@ -2135,7 +2135,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   pulseSpeed: 8
-  revealHoldDuration: 10
+  revealHoldDuration: 5
   waveFadeDuration: 0.75
   fadeSpeed: 0.6
   maxPulses: 12
@@ -2222,7 +2222,7 @@ MonoBehaviour:
   - {fileID: 1428836318}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2
   m_VisitedStateRenderers: []
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
@@ -5596,7 +5596,7 @@ MonoBehaviour:
   - {fileID: 1428836318}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2
   m_VisitedStateRenderers: []
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
@@ -11556,7 +11556,7 @@ MonoBehaviour:
   - {fileID: 1428836318}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2
   m_VisitedStateRenderers: []
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
@@ -12146,7 +12146,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_MaxEnergy: 100
-  m_StartingEnergy: 80
+  m_StartingEnergy: 50
   m_RegenAmount: 1
   m_RegenInterval: 3
   m_RefillDuration: 0.6
@@ -12165,9 +12165,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_XROrigin: {fileID: 0}
   m_ViewTransform: {fileID: 0}
-  m_Cooldown: 5
+  m_Cooldown: 20
   m_DisplayDuration: 5
-  m_MaxPingDistance: 50
+  m_MaxPingDistance: 30
   m_ConeAngle: 120
   m_ForwardThreshold: 0.55
   m_ResetThreshold: 0.2

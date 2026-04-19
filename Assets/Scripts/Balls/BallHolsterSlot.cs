@@ -26,6 +26,9 @@ namespace CIS5680VRGame.Balls
         bool m_HasResolvedEnergyCost;
         bool m_HasTemporaryEnergyCostOverride;
         int m_TemporaryEnergyCostOverride;
+        int m_PersistentEnergyCostModifier;
+        BallType m_ResolvedBallType;
+        bool m_HasResolvedBallType;
         Coroutine m_SpawnCoroutine;
         Coroutine m_StartupCleanupCoroutine;
 
@@ -33,11 +36,12 @@ namespace CIS5680VRGame.Balls
         public bool IsInfinite => m_StartingCount < 0;
         public int RemainingCount => m_RemainingCount;
         public int DefaultEnergyCost => GetResolvedEnergyCost();
-        public int EnergyCost => m_HasTemporaryEnergyCostOverride ? m_TemporaryEnergyCostOverride : GetResolvedEnergyCost();
+        public int EnergyCost => m_HasTemporaryEnergyCostOverride ? m_TemporaryEnergyCostOverride : GetEffectivePersistentEnergyCost();
         public bool UsesEnergy => m_PlayerEnergy != null;
         public bool IsFull => UsesEnergy
             ? m_PlayerEnergy.CurrentEnergy >= m_PlayerEnergy.MaxEnergy
             : IsInfinite || m_RemainingCount >= m_StartingCount;
+        public BallType BallType => GetResolvedBallType();
 
         void Awake()
         {
@@ -114,6 +118,14 @@ namespace CIS5680VRGame.Balls
             return m_RemainingCount != previousCount;
         }
 
+        public bool RefillAmount(float amount)
+        {
+            if (UsesEnergy)
+                return m_PlayerEnergy != null && m_PlayerEnergy.RestoreAmount(amount);
+
+            return RefillToMax();
+        }
+
         public bool CanAffordEnergy()
         {
             return !UsesEnergy || m_PlayerEnergy.CanAfford(EnergyCost);
@@ -143,6 +155,11 @@ namespace CIS5680VRGame.Balls
 
             m_HasTemporaryEnergyCostOverride = false;
             m_TemporaryEnergyCostOverride = 0;
+        }
+
+        public void SetPersistentEnergyCostModifier(int modifier)
+        {
+            m_PersistentEnergyCostModifier = modifier;
         }
 
         bool HasStock()
@@ -349,6 +366,30 @@ namespace CIS5680VRGame.Balls
             }
 
             return m_ResolvedEnergyCost;
+        }
+
+        int GetEffectivePersistentEnergyCost()
+        {
+            return Mathf.Max(0, GetResolvedEnergyCost() + m_PersistentEnergyCostModifier);
+        }
+
+        BallType GetResolvedBallType()
+        {
+            if (!m_HasResolvedBallType)
+            {
+                m_ResolvedBallType = ResolveBallType();
+                m_HasResolvedBallType = true;
+            }
+
+            return m_ResolvedBallType;
+        }
+
+        BallType ResolveBallType()
+        {
+            if (m_ThrowableBallPrefab != null && m_ThrowableBallPrefab.TryGetComponent<BallImpactEffect>(out var effect))
+                return effect.BallType;
+
+            return BallType.Teleport;
         }
     }
 }

@@ -144,6 +144,7 @@ namespace CIS5680VRGame.Generation
             else
                 m_LastRuntimeProfileSummary = "Runtime random maze profile override disabled in inspector.";
 
+            TryApplySingleLoadSeedOverride();
             CurrentSeed = ResolveSeed();
 
             if (m_ClearGeneratedContentOnAwake)
@@ -295,6 +296,20 @@ namespace CIS5680VRGame.Generation
                 m_StartZoneRatio = Mathf.Clamp01(profile.skeletonRules.startZoneRatio);
                 m_MidZoneRatio = Mathf.Clamp01(profile.skeletonRules.midZoneRatio);
             }
+        }
+
+        void TryApplySingleLoadSeedOverride()
+        {
+            if (!Application.isPlaying)
+                return;
+
+            if (!RandomMazeSceneSeedOverrideService.TryConsumeSeedOverride(gameObject.scene.name, out int overrideSeed))
+                return;
+
+            m_UseFixedSeed = true;
+            m_FixedSeed = overrideSeed;
+            m_LastRuntimeProfileSummary =
+                $"{m_LastRuntimeProfileSummary}\nApplied single-load scene seed override {overrideSeed} for {gameObject.scene.name}.";
         }
 
         public void ApplyConfiguredGeneratorSettings()

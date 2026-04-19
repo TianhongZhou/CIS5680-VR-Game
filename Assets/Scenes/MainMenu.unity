@@ -1986,7 +1986,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   pulseSpeed: 8
-  revealHoldDuration: 10
+  revealHoldDuration: 5
   waveFadeDuration: 0.75
   fadeSpeed: 0.6
   maxPulses: 12
@@ -2073,7 +2073,7 @@ MonoBehaviour:
   - {fileID: 0}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2
   m_VisitedStateRenderers: []
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
@@ -5004,7 +5004,7 @@ MonoBehaviour:
   - {fileID: 0}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2
   m_VisitedStateRenderers: []
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
@@ -9800,7 +9800,7 @@ MonoBehaviour:
   - {fileID: 0}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2
   m_VisitedStateRenderers: []
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}

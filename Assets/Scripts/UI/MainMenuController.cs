@@ -1,4 +1,5 @@
 using CIS5680VRGame.Gameplay;
+using CIS5680VRGame.Progression;
 using TMPro;
 using Unity.XR.CoreUtils;
 using UnityEngine;
@@ -16,6 +17,7 @@ namespace CIS5680VRGame.UI
 
         [SerializeField] string m_GameplaySceneName = "Maze1";
         [SerializeField] string m_TutorialSceneName = "TutorialLevel";
+        [SerializeField] string m_ShopSceneName = "ShopScene";
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] string m_Title = "SONAR BOUNCE";
         [SerializeField] Vector2 m_MenuSize = new(620f, 460f);
@@ -33,6 +35,8 @@ namespace CIS5680VRGame.UI
         GameObject m_MenuRoot;
         GameObject m_ButtonColumn;
         GameObject m_TutorialPromptOverlay;
+        Button m_ContinueButton;
+        TextMeshProUGUI m_GoldSummaryLabel;
         AudioSource m_BackgroundMusicSource;
         AudioClip m_BackgroundMusicClip;
 
@@ -49,6 +53,8 @@ namespace CIS5680VRGame.UI
             TryReuseExistingMenuRoot();
             CreateMenuIfNeeded();
             EnsureBackgroundMusic();
+            RefreshContinueButtonState();
+            RefreshGoldSummaryLabel();
         }
 
         void OnDestroy()
@@ -109,13 +115,14 @@ namespace CIS5680VRGame.UI
                 return;
 
             bool createdNewRoot = m_MenuRoot == null;
+            Vector2 resolvedMenuSize = ResolveMenuSize();
             RectTransform panelRect;
             if (createdNewRoot)
             {
                 m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
                     "MainMenuCanvas",
                     menuCamera,
-                    m_MenuSize,
+                    resolvedMenuSize,
                     new Color(0f, 0f, 0f, 0.18f),
                     out panelRect);
             }
@@ -126,7 +133,7 @@ namespace CIS5680VRGame.UI
             }
 
             ConfigureMenuCanvas(menuCamera);
-            ConfigurePanelTransform(panelRect);
+            ConfigurePanelTransform(panelRect, resolvedMenuSize);
             ResolveMenuSections();
 
             if (!createdNewRoot && MenuRootNeedsRefresh())
@@ -139,6 +146,8 @@ namespace CIS5680VRGame.UI
             if (!createdNewRoot)
             {
                 SetTutorialPromptVisible(false);
+                RefreshContinueButtonState();
+                RefreshGoldSummaryLabel();
                 return;
             }
 
@@ -173,6 +182,18 @@ namespace CIS5680VRGame.UI
                 false,
                 true);
 
+            m_GoldSummaryLabel = CreateLabel(
+                "GoldSummary",
+                panel.transform,
+                string.Empty,
+                fontAsset,
+                28f,
+                FontStyles.Bold,
+                new Color(0.98f, 0.84f, 0.32f, 1f),
+                46f,
+                false,
+                true);
+
             GameObject spacer = ModalMenuPauseUtility.CreateUIObject("Spacer", panel.transform);
             RectTransform spacerRect = spacer.GetComponent<RectTransform>();
             spacerRect.sizeDelta = new Vector2(0f, 10f);
@@ -187,7 +208,7 @@ namespace CIS5680VRGame.UI
             contentAreaRect.offsetMax = Vector2.zero;
 
             LayoutElement contentAreaLayout = contentArea.AddComponent<LayoutElement>();
-            float contentAreaHeight = Mathf.Max(m_ButtonSize.y * 2f + 60f, m_MenuSize.y - 210f);
+            float contentAreaHeight = ResolveContentAreaHeight();
             contentAreaRect.sizeDelta = new Vector2(0f, contentAreaHeight);
             contentAreaLayout.preferredHeight = contentAreaHeight;
             contentAreaLayout.flexibleHeight = 1f;
@@ -212,6 +233,15 @@ namespace CIS5680VRGame.UI
             buttonFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
             buttonFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
+            m_ContinueButton = CreateButton(
+                "ContinueButton",
+                m_ButtonColumn.transform,
+                "Continue",
+                fontAsset,
+                new Color(0.18f, 0.72f, 0.42f, 0.96f),
+                ContinueGame,
+                UIButtonSoundStyle.Confirm);
+
             CreateButton(
                 "NewGameButton",
                 m_ButtonColumn.transform,
@@ -220,6 +250,15 @@ namespace CIS5680VRGame.UI
                 new Color(0.12f, 0.68f, 0.98f, 0.96f),
                 ShowTutorialPrompt,
                 UIButtonSoundStyle.Confirm);
+
+            CreateButton(
+                "ShopButton",
+                m_ButtonColumn.transform,
+                "Shop",
+                fontAsset,
+                new Color(0.76f, 0.64f, 0.18f, 0.96f),
+                LoadShop,
+                UIButtonSoundStyle.Normal);
 
             CreateButton(
                 "QuitButton",
@@ -340,6 +379,8 @@ namespace CIS5680VRGame.UI
                 m_TutorialCancelButtonSize);
 
             SetTutorialPromptVisible(false);
+            RefreshContinueButtonState();
+            RefreshGoldSummaryLabel();
             ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
         }
 
@@ -366,6 +407,8 @@ namespace CIS5680VRGame.UI
             m_MenuRoot = null;
             m_ButtonColumn = null;
             m_TutorialPromptOverlay = null;
+            m_ContinueButton = null;
+            m_GoldSummaryLabel = null;
         }
 
         void ConfigureMenuCanvas(Camera menuCamera)
@@ -391,7 +434,20 @@ namespace CIS5680VRGame.UI
             return panelTransform as RectTransform;
         }
 
-        void ConfigurePanelTransform(RectTransform panelRect)
+        Vector2 ResolveMenuSize()
+        {
+            float contentAreaHeight = ResolveContentAreaHeight();
+            Vector2 resolvedMenuSize = m_MenuSize;
+            resolvedMenuSize.y = Mathf.Max(resolvedMenuSize.y, 312f + contentAreaHeight);
+            return resolvedMenuSize;
+        }
+
+        float ResolveContentAreaHeight()
+        {
+            return Mathf.Max(m_ButtonSize.y * 4f + 114f, m_MenuSize.y - 276f);
+        }
+
+        void ConfigurePanelTransform(RectTransform panelRect, Vector2 resolvedMenuSize)
         {
             if (panelRect == null)
                 return;
@@ -400,7 +456,7 @@ namespace CIS5680VRGame.UI
             panelRect.anchorMax = m_PanelAnchor;
             panelRect.pivot = new Vector2(0.5f, 0.5f);
             panelRect.anchoredPosition = m_PanelOffset;
-            panelRect.sizeDelta = m_MenuSize;
+            panelRect.sizeDelta = resolvedMenuSize;
         }
 
         bool MenuRootNeedsRefresh()
@@ -416,9 +472,12 @@ namespace CIS5680VRGame.UI
             bool hasLegacyButtons = panelTransform.Find("Buttons") != null;
             bool hasLegacyPromptOverlay = panelTransform.Find("TutorialPromptOverlay") != null;
             bool hasLegacyPrompt = panelTransform.Find("TutorialPrompt") != null;
+            bool hasGoldSummary = panelTransform.Find("GoldSummary") != null;
             bool hasButtonColumn = contentAreaTransform != null && contentAreaTransform.Find("Buttons") != null;
             bool hasPromptOverlay = contentAreaTransform != null && contentAreaTransform.Find("TutorialPromptOverlay") != null;
-            return contentAreaTransform == null || !hasButtonColumn || !hasPromptOverlay || hasLegacyButtons || hasLegacyPromptOverlay || hasLegacyPrompt;
+            bool hasContinueButton = contentAreaTransform != null && contentAreaTransform.Find("Buttons/ContinueButton") != null;
+            bool hasShopButton = contentAreaTransform != null && contentAreaTransform.Find("Buttons/ShopButton") != null;
+            return contentAreaTransform == null || !hasButtonColumn || !hasPromptOverlay || !hasContinueButton || !hasShopButton || !hasGoldSummary || hasLegacyButtons || hasLegacyPromptOverlay || hasLegacyPrompt;
         }
 
         void ResolveMenuSections()
@@ -439,6 +498,20 @@ namespace CIS5680VRGame.UI
                 if (promptTransform != null)
                     m_TutorialPromptOverlay = promptTransform.gameObject;
             }
+
+            if (m_ContinueButton == null)
+            {
+                Transform continueTransform = m_MenuRoot.transform.Find("Panel/ContentArea/Buttons/ContinueButton");
+                if (continueTransform != null)
+                    m_ContinueButton = continueTransform.GetComponent<Button>();
+            }
+
+            if (m_GoldSummaryLabel == null)
+            {
+                Transform goldSummaryTransform = m_MenuRoot.transform.Find("Panel/GoldSummary");
+                if (goldSummaryTransform != null)
+                    m_GoldSummaryLabel = goldSummaryTransform.GetComponent<TextMeshProUGUI>();
+            }
         }
 
         void SetTutorialPromptVisible(bool visible)
@@ -456,7 +529,25 @@ namespace CIS5680VRGame.UI
                 ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
         }
 
-        void CreateLabel(
+        void RefreshContinueButtonState()
+        {
+            ResolveMenuSections();
+            if (m_ContinueButton == null)
+                return;
+
+            m_ContinueButton.interactable = ProfileService.TryGetContinueSceneName(out _);
+        }
+
+        void RefreshGoldSummaryLabel()
+        {
+            ResolveMenuSections();
+            if (m_GoldSummaryLabel == null)
+                return;
+
+            m_GoldSummaryLabel.text = $"Total Gold: {ProfileService.GetTotalGold()}";
+        }
+
+        TextMeshProUGUI CreateLabel(
             string name,
             Transform parent,
             string text,
@@ -489,9 +580,11 @@ namespace CIS5680VRGame.UI
                 label.fontSizeMin = Mathf.Max(18f, fontSize * 0.55f);
                 label.enableWordWrapping = false;
             }
+
+            return label;
         }
 
-        void CreateButton(
+        Button CreateButton(
             string name,
             Transform parent,
             string label,
@@ -544,6 +637,8 @@ namespace CIS5680VRGame.UI
             buttonLabel.enableAutoSizing = true;
             buttonLabel.fontSizeMax = labelFontSize;
             buttonLabel.fontSizeMin = Mathf.Max(18f, labelFontSize * 0.72f);
+
+            return button;
         }
 
         void ShowTutorialPrompt()
@@ -560,6 +655,7 @@ namespace CIS5680VRGame.UI
         {
             Time.timeScale = 1f;
             AudioListener.pause = false;
+            ProfileService.BeginNewGameOnSceneLoad(m_TutorialSceneName);
             SceneTransitionService.LoadScene(m_TutorialSceneName, m_BackgroundMusicSource);
         }
 
@@ -567,7 +663,25 @@ namespace CIS5680VRGame.UI
         {
             Time.timeScale = 1f;
             AudioListener.pause = false;
+            ProfileService.BeginNewGameOnSceneLoad(m_GameplaySceneName);
             SceneTransitionService.LoadScene(m_GameplaySceneName, m_BackgroundMusicSource);
+        }
+
+        void LoadShop()
+        {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+            SceneTransitionService.LoadScene(m_ShopSceneName, m_BackgroundMusicSource);
+        }
+
+        void ContinueGame()
+        {
+            if (!ProfileService.TryGetContinueSceneName(out string continueSceneName))
+                return;
+
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+            SceneTransitionService.LoadScene(continueSceneName, m_BackgroundMusicSource);
         }
 
         void QuitGame()

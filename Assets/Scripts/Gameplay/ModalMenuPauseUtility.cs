@@ -8,6 +8,7 @@ using UnityEngine.XR.Interaction.Toolkit.Inputs;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Locomotion;
+using UnityEngine.XR.Interaction.Toolkit.UI;
 using UnityEngine.XR.Interaction.Toolkit.Samples.StarterAssets;
 using Object = UnityEngine.Object;
 using System.Collections.Generic;
@@ -284,12 +285,8 @@ namespace CIS5680VRGame.Gameplay
             if (target == null)
                 return;
 
-            const string trackedRaycasterTypeName =
-                "UnityEngine.XR.Interaction.Toolkit.UI.TrackedDeviceGraphicRaycaster, Unity.XR.Interaction.Toolkit";
-
-            System.Type trackedRaycasterType = System.Type.GetType(trackedRaycasterTypeName);
-            if (trackedRaycasterType != null && target.GetComponent(trackedRaycasterType) == null)
-                target.AddComponent(trackedRaycasterType);
+            if (target.GetComponent<TrackedDeviceGraphicRaycaster>() == null)
+                target.AddComponent<TrackedDeviceGraphicRaycaster>();
         }
     }
 }

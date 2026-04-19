@@ -33,6 +33,10 @@ namespace CIS5680VRGame.Balls
         bool m_WasThrown;
         bool m_Consumed;
 
+        public LayerMask ValidGroundLayers => m_ValidGroundLayers;
+        public float MinGroundUpDot => m_MinGroundUpDot;
+        public bool RequireGroundContact => m_RequireGroundContact;
+
         void Awake()
         {
             m_GrabInteractable = GetComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();

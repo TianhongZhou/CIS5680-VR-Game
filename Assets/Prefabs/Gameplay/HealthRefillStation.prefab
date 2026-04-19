@@ -328,7 +328,7 @@ MonoBehaviour:
   m_PlayerRig: {fileID: 0}
   m_PulseVisual: {fileID: 7464434501638269775}
   m_GlowLight: {fileID: 8484749922032518954}
-  m_Cooldown: 5
+  m_Cooldown: 20
   m_ReadyBackgroundColor: {r: 0.02, g: 0.14, b: 0.05, a: 1}
   m_ReadyPulseColor: {r: 0.38, g: 1, b: 0.46, a: 1}
   m_CooldownBackgroundColor: {r: 0.05, g: 0.05, b: 0.05, a: 1}
