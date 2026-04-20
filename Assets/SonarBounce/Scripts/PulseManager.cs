@@ -3,17 +3,31 @@ using System.Collections.Generic;
 
 public class PulseManager : MonoBehaviour
 {
+    static class SharedDefaults
+    {
+        public const float PulseSpeed = 8f;
+        public const float RevealHoldDuration = 5f;
+        public const float WaveFadeDuration = 0.75f;
+        public const float FadeSpeed = 0.6f;
+        public const int MaxPulses = 12;
+        public const int MaxGlowPoints = 8;
+    }
+
     public static PulseManager Instance { get; private set; }
+    float m_BaseRevealHoldDuration;
+    float m_PersistentRevealHoldDurationBonusSeconds;
+    int m_SingleRunRevealHoldDurationBonusPercent;
+    [SerializeField] bool m_OverrideSharedDefaults;
 
     [Header("Pulse Settings")]
-    public float pulseSpeed = 8f;
-    public float revealHoldDuration = 10f;
-    public float waveFadeDuration = 0.75f;
-    public float fadeSpeed = 0.6f;
+    public float pulseSpeed = SharedDefaults.PulseSpeed;
+    public float revealHoldDuration = SharedDefaults.RevealHoldDuration;
+    public float waveFadeDuration = SharedDefaults.WaveFadeDuration;
+    public float fadeSpeed = SharedDefaults.FadeSpeed;
 
     [Header("Limits")]
-    public int maxPulses = 12;
-    public int maxGlowPoints = 8;
+    public int maxPulses = SharedDefaults.MaxPulses;
+    public int maxGlowPoints = SharedDefaults.MaxGlowPoints;
 
     struct Pulse
     {
@@ -49,10 +63,22 @@ public class PulseManager : MonoBehaviour
     Vector4[] glowPointsBuf;
     float[] glowIntensitiesBuf;
 
+    void Reset()
+    {
+        ApplySharedDefaults();
+    }
+
+    void OnValidate()
+    {
+        ApplySharedDefaults();
+    }
+
     void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
+        ApplySharedDefaults();
+        m_BaseRevealHoldDuration = revealHoldDuration;
 
         pulseOriginsBuf     = new Vector4[maxPulses];
         pulseNormalsBuf     = new Vector4[maxPulses];
@@ -64,6 +90,31 @@ public class PulseManager : MonoBehaviour
         glowIntensitiesBuf  = new float[maxGlowPoints];
     }
 
+    void ApplySharedDefaults()
+    {
+        if (m_OverrideSharedDefaults)
+            return;
+
+        pulseSpeed = SharedDefaults.PulseSpeed;
+        revealHoldDuration = SharedDefaults.RevealHoldDuration;
+        waveFadeDuration = SharedDefaults.WaveFadeDuration;
+        fadeSpeed = SharedDefaults.FadeSpeed;
+        maxPulses = SharedDefaults.MaxPulses;
+        maxGlowPoints = SharedDefaults.MaxGlowPoints;
+    }
+
+    public void ApplyPersistentRevealHoldDurationBonus(float bonusSeconds)
+    {
+        m_PersistentRevealHoldDurationBonusSeconds = Mathf.Max(0f, bonusSeconds);
+        RecomputeRevealHoldDuration();
+    }
+
+    public void ApplySingleRunRevealHoldDurationBonusPercent(int bonusPercent)
+    {
+        m_SingleRunRevealHoldDurationBonusPercent = Mathf.Max(0, bonusPercent);
+        RecomputeRevealHoldDuration();
+    }
+
     void Update()
     {
         UpdatePulses();
@@ -73,15 +124,20 @@ public class PulseManager : MonoBehaviour
 
     public void SpawnPulse(Vector3 origin, float maxRadius)
     {
-        SpawnPulse(origin, Vector3.up, maxRadius, null);
+        SpawnPulse(origin, Vector3.up, maxRadius, null, null);
     }
 
     public void SpawnPulse(Vector3 origin, Vector3 normal, float maxRadius)
     {
-        SpawnPulse(origin, normal, maxRadius, null);
+        SpawnPulse(origin, normal, maxRadius, null, null);
     }
 
     public void SpawnPulse(Vector3 origin, Vector3 normal, float maxRadius, Collider sourceCollider)
+    {
+        SpawnPulse(origin, normal, maxRadius, sourceCollider, null);
+    }
+
+    public void SpawnPulse(Vector3 origin, Vector3 normal, float maxRadius, Collider sourceCollider, float? customRevealHoldDuration)
     {
         if (activePulses.Count >= maxPulses)
         {
@@ -114,7 +170,7 @@ public class PulseManager : MonoBehaviour
             intensity = 1f,
             waveIntensity = 1f,
             maxRadius = maxRadius,
-            holdTimeRemaining = revealHoldDuration,
+            holdTimeRemaining = Mathf.Max(0f, customRevealHoldDuration ?? revealHoldDuration),
             reachedMaxRadius = false,
             sourceBoundsCenter = sourceBounds.center,
             sourceBoundsExtents = sourceBounds.extents,
@@ -259,5 +315,12 @@ public class PulseManager : MonoBehaviour
         Shader.SetGlobalVectorArray("_GlowPoints", glowPointsBuf);
         Shader.SetGlobalFloatArray("_GlowIntensities", glowIntensitiesBuf);
         Shader.SetGlobalInt("_GlowCount", glowCount);
+    }
+
+    void RecomputeRevealHoldDuration()
+    {
+        float persistentRevealHoldDuration = Mathf.Max(0f, m_BaseRevealHoldDuration + m_PersistentRevealHoldDurationBonusSeconds);
+        float singleRunMultiplier = 1f + Mathf.Max(0, m_SingleRunRevealHoldDurationBonusPercent) / 100f;
+        revealHoldDuration = Mathf.Max(0f, persistentRevealHoldDuration * singleRunMultiplier);
     }
 }

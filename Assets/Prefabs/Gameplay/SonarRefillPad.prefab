@@ -120,4 +120,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_TargetSlots: []
   m_PlayerRig: {fileID: 0}
-  m_Charges: -1
+  m_Charges: 2

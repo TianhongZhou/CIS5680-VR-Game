@@ -145,3 +145,6 @@ MonoBehaviour:
   m_DamagePerSecond: 10
   m_TriggerWorldHeight: 1.35
   m_TriggerWorldCenterY: 0.68
+  m_AmbienceVolume: 1
+  m_AmbienceActivationDistance: 3
+  m_AmbienceSmoothTime: 0.28

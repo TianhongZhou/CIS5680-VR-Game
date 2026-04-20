@@ -1,0 +1,58 @@
+{
+    "exportedAtLocal": "2026-04-18 20:50:16",
+    "exportedAtUtc": "2026-04-19T00:50:16.0686354Z",
+    "sourceScenePath": "Assets/Scenes/random-maze.unity",
+    "profileVersion": 1,
+    "useFixedSeed": true,
+    "fixedSeed": 12349,
+    "currentSeed": 12349,
+    "exportSeed": 12349,
+    "isGenerationConfigurationValid": true,
+    "generationValidationMessage": "",
+    "lastGeneratedMainPathBuildMode": "Normal",
+    "mazeSize": 30,
+    "featureCounts": {
+        "energyRefillCount": 8,
+        "healthRefillCount": 5,
+        "trapCount": 6,
+        "rewardCount": 5
+    },
+    "placementRules": {
+        "minSameTypeCellDistance": 4,
+        "minCrossTypeCellDistance": 2,
+        "startSafeDistance": 2,
+        "goalSafeDistance": 2,
+        "rewardMinBranchDepth": 2
+    },
+    "skeletonRules": {
+        "minGoalDistanceFromStart": 7,
+        "branchFreeStartCells": 3,
+        "preferredStraightStartCells": 3,
+        "startZoneRatio": 0.25,
+        "midZoneRatio": 0.3499999940395355
+    },
+    "derivedProfile": {
+        "gridWidth": 30,
+        "gridHeight": 30,
+        "minMainPathLength": 28,
+        "maxMainPathLength": 32,
+        "maxMainPathAttempts": 900,
+        "minBranchCount": 3,
+        "maxBranchCount": 10,
+        "minBranchLength": 5,
+        "maxBranchLength": 10
+    },
+    "batchSeedSmokeTest": {
+        "startSeed": 102321,
+        "seedCount": 1000
+    },
+    "currentLayoutSummary": {
+        "seed": 0,
+        "mainPathLength": 0,
+        "targetMainPathLength": 0,
+        "branchCount": 0,
+        "totalCellCount": 0,
+        "resolvedMainPathMode": "",
+        "usedDegradedMainPathLength": false
+    }
+}

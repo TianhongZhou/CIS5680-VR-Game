@@ -1985,8 +1985,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 664065a1d34864a5aa46918de23e5cba, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  m_OverrideSharedDefaults: 0
   pulseSpeed: 8
-  revealHoldDuration: 10
+  revealHoldDuration: 5
   waveFadeDuration: 0.75
   fadeSpeed: 0.6
   maxPulses: 12
@@ -2073,8 +2074,15 @@ MonoBehaviour:
   - {fileID: 0}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_OverrideSharedDefaults: 0
+  m_Charges: 2
+  m_Cooldown: 20
+  m_BaseRefillAmount: 50
   m_VisitedStateRenderers: []
+  m_RechargingColorA: {r: 0.34, g: 0.16, b: 0.04, a: 1}
+  m_RechargingColorB: {r: 1, g: 0.6, b: 0.18, a: 1}
+  m_RechargingRimColor: {r: 1, g: 0.88, b: 0.5, a: 0.34}
+  m_RechargingFlashFrequency: 3.2
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
 --- !u!23 &211835338
@@ -5004,8 +5012,15 @@ MonoBehaviour:
   - {fileID: 0}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_OverrideSharedDefaults: 0
+  m_Charges: 2
+  m_Cooldown: 20
+  m_BaseRefillAmount: 50
   m_VisitedStateRenderers: []
+  m_RechargingColorA: {r: 0.34, g: 0.16, b: 0.04, a: 1}
+  m_RechargingColorB: {r: 1, g: 0.6, b: 0.18, a: 1}
+  m_RechargingRimColor: {r: 1, g: 0.88, b: 0.5, a: 0.34}
+  m_RechargingFlashFrequency: 3.2
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
 --- !u!23 &571111307
@@ -9800,8 +9815,15 @@ MonoBehaviour:
   - {fileID: 0}
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
-  m_Charges: -1
+  m_OverrideSharedDefaults: 0
+  m_Charges: 2
+  m_Cooldown: 20
+  m_BaseRefillAmount: 50
   m_VisitedStateRenderers: []
+  m_RechargingColorA: {r: 0.34, g: 0.16, b: 0.04, a: 1}
+  m_RechargingColorB: {r: 1, g: 0.6, b: 0.18, a: 1}
+  m_RechargingRimColor: {r: 1, g: 0.88, b: 0.5, a: 0.34}
+  m_RechargingFlashFrequency: 3.2
   m_VisitedColor: {r: 0.18, g: 0.84, b: 0.96, a: 1}
   m_VisitedRimColor: {r: 0.9, g: 1, b: 1, a: 0.24}
 --- !u!23 &986810058
@@ -18536,6 +18558,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_ShowOverlay: 1
+  m_ShowOverlayDuringPlayMode: 0
   m_AutoCollectColliders: 1
   m_TargetColliders:
   - {fileID: 1888033109}
@@ -18577,6 +18600,7 @@ MonoBehaviour:
   m_MazeRoot: {fileID: 1847243961}
   m_BoundaryWallsRoot: {fileID: 1908583948}
   m_FloorMeshFilter: {fileID: 1888033111}
+  m_FloorTilesRoot: {fileID: 0}
   m_SourceMaterial: {fileID: 2100000, guid: 1abfd942d3af53745b3214062b4a4d53, type: 2}
   m_OutputMaterial: {fileID: 2100000, guid: 381371b9b5c581444bb9effa652cd468, type: 2}
   m_OutputMeshFilter: {fileID: 864092311}
@@ -20102,6 +20126,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_ShowOverlay: 1
+  m_ShowOverlayDuringPlayMode: 0
   m_AutoCollectColliders: 1
   m_TargetColliders:
   - {fileID: 1351420134}
@@ -21014,10 +21039,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_GameplaySceneName: Maze1
   m_TutorialSceneName: TutorialLevel
+  m_ShopSceneName: ShopScene
   m_PlayerRig: {fileID: 988933499}
   m_Title: SONAR BOUNCE
-  m_MenuSize: {x: 500, y: 450}
-  m_ButtonSize: {x: 320, y: 84}
+  m_MenuSize: {x: 400, y: 350}
+  m_ButtonSize: {x: 300, y: 75}
   m_TutorialPromptSize: {x: 540, y: 360}
   m_TutorialChoiceButtonSize: {x: 160, y: 60}
   m_TutorialCancelButtonSize: {x: 240, y: 56}
@@ -21025,7 +21051,7 @@ MonoBehaviour:
   m_TutorialCancelButtonFontSize: 24
   m_PanelAnchor: {x: 0.34, y: 0.52}
   m_PanelOffset: {x: 180, y: -160}
-  m_CanvasPlaneDistance: 0.5
+  m_CanvasPlaneDistance: 0.8
   m_BackgroundMusicVolume: 0.32
 --- !u!4 &2079030263
 Transform:

@@ -146,7 +146,7 @@ namespace CIS5680VRGame.Gameplay
             CreateLabel(
                 "Message",
                 panel.transform,
-                "You are ready for the maze. Start the full game or replay the tutorial.",
+                "You are ready for the maze. \n Start the full game or replay the tutorial.",
                 fontAsset,
                 28f,
                 FontStyles.Normal,

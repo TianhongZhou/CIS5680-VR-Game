@@ -26,17 +26,22 @@ namespace CIS5680VRGame.Balls
         bool m_HasResolvedEnergyCost;
         bool m_HasTemporaryEnergyCostOverride;
         int m_TemporaryEnergyCostOverride;
+        int m_PersistentEnergyCostModifier;
+        BallType m_ResolvedBallType;
+        bool m_HasResolvedBallType;
         Coroutine m_SpawnCoroutine;
+        Coroutine m_StartupCleanupCoroutine;
 
         public string DisplayName => m_DisplayName;
         public bool IsInfinite => m_StartingCount < 0;
         public int RemainingCount => m_RemainingCount;
         public int DefaultEnergyCost => GetResolvedEnergyCost();
-        public int EnergyCost => m_HasTemporaryEnergyCostOverride ? m_TemporaryEnergyCostOverride : GetResolvedEnergyCost();
+        public int EnergyCost => m_HasTemporaryEnergyCostOverride ? m_TemporaryEnergyCostOverride : GetEffectivePersistentEnergyCost();
         public bool UsesEnergy => m_PlayerEnergy != null;
         public bool IsFull => UsesEnergy
             ? m_PlayerEnergy.CurrentEnergy >= m_PlayerEnergy.MaxEnergy
             : IsInfinite || m_RemainingCount >= m_StartingCount;
+        public BallType BallType => GetResolvedBallType();
 
         void Awake()
         {
@@ -61,6 +66,9 @@ namespace CIS5680VRGame.Balls
         {
             if (m_SpawnOnStart && HasStock() && !m_SocketInteractor.hasSelection)
                 SpawnBallInSocket();
+
+            if (m_SpawnOnStart)
+                RestartStartupCleanup();
         }
 
         void OnDisable()
@@ -71,6 +79,12 @@ namespace CIS5680VRGame.Balls
             {
                 StopCoroutine(m_SpawnCoroutine);
                 m_SpawnCoroutine = null;
+            }
+
+            if (m_StartupCleanupCoroutine != null)
+            {
+                StopCoroutine(m_StartupCleanupCoroutine);
+                m_StartupCleanupCoroutine = null;
             }
         }
 
@@ -104,6 +118,14 @@ namespace CIS5680VRGame.Balls
             return m_RemainingCount != previousCount;
         }
 
+        public bool RefillAmount(float amount)
+        {
+            if (UsesEnergy)
+                return m_PlayerEnergy != null && m_PlayerEnergy.RestoreAmount(amount);
+
+            return RefillToMax();
+        }
+
         public bool CanAffordEnergy()
         {
             return !UsesEnergy || m_PlayerEnergy.CanAfford(EnergyCost);
@@ -135,6 +157,11 @@ namespace CIS5680VRGame.Balls
             m_TemporaryEnergyCostOverride = 0;
         }
 
+        public void SetPersistentEnergyCostModifier(int modifier)
+        {
+            m_PersistentEnergyCostModifier = modifier;
+        }
+
         bool HasStock()
         {
             if (UsesEnergy)
@@ -151,6 +178,13 @@ namespace CIS5680VRGame.Balls
             if (args.isCanceled)
                 return;
 
+            if (!WasTransferredToAnotherInteractor(args))
+            {
+                DestroyUnexpectedReleasedBall(args);
+                QueueRespawnIfNeeded();
+                return;
+            }
+
             if (UsesEnergy)
             {
                 // Energy is consumed when a non-socket interactor actually completes the grab.
@@ -162,8 +196,7 @@ namespace CIS5680VRGame.Balls
 
             RefreshVisualState();
 
-            if (HasStock() && gameObject.activeInHierarchy)
-                m_SpawnCoroutine = StartCoroutine(SpawnNextFrame());
+            QueueRespawnIfNeeded();
         }
 
         IEnumerator SpawnNextFrame()
@@ -207,6 +240,94 @@ namespace CIS5680VRGame.Balls
             m_SocketInteractor.StartManualInteraction((UnityEngine.XR.Interaction.Toolkit.Interactables.IXRSelectInteractable)grabInteractable);
         }
 
+        bool WasTransferredToAnotherInteractor(SelectExitEventArgs args)
+        {
+            var interactable = args.interactableObject;
+            if (interactable == null || !interactable.isSelected)
+                return false;
+
+            var selectors = interactable.interactorsSelecting;
+            for (int i = 0; i < selectors.Count; i++)
+            {
+                if (selectors[i] == null || selectors[i] == m_SocketInteractor)
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        void DestroyUnexpectedReleasedBall(SelectExitEventArgs args)
+        {
+            var interactable = args.interactableObject;
+            if (interactable?.transform == null)
+                return;
+
+            Destroy(interactable.transform.gameObject);
+        }
+
+        void QueueRespawnIfNeeded()
+        {
+            RefreshVisualState();
+
+            if (!HasStock() || !gameObject.activeInHierarchy)
+                return;
+
+            if (m_SpawnCoroutine != null)
+                StopCoroutine(m_SpawnCoroutine);
+
+            m_SpawnCoroutine = StartCoroutine(SpawnNextFrame());
+        }
+
+        void RestartStartupCleanup()
+        {
+            if (m_StartupCleanupCoroutine != null)
+                StopCoroutine(m_StartupCleanupCoroutine);
+
+            m_StartupCleanupCoroutine = StartCoroutine(CleanupStartupDuplicates());
+        }
+
+        IEnumerator CleanupStartupDuplicates()
+        {
+            const int cleanupPasses = 6;
+            string cloneName = m_ThrowableBallPrefab != null ? $"{m_ThrowableBallPrefab.name}(Clone)" : string.Empty;
+
+            for (int pass = 0; pass < cleanupPasses; pass++)
+            {
+                yield return null;
+
+                if (!isActiveAndEnabled || !gameObject.activeInHierarchy || m_SocketInteractor == null || !m_SocketInteractor.hasSelection)
+                    continue;
+
+                if (string.IsNullOrEmpty(cloneName))
+                    continue;
+
+                CleanupLooseClones(cloneName);
+            }
+
+            m_StartupCleanupCoroutine = null;
+        }
+
+        void CleanupLooseClones(string cloneName)
+        {
+            var selectedInteractables = m_SocketInteractor.interactablesSelected;
+            var heldInteractable = selectedInteractables.Count > 0 ? selectedInteractables[0] : null;
+            var grabInteractables = FindObjectsOfType<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>(true);
+
+            for (int i = 0; i < grabInteractables.Length; i++)
+            {
+                var grabInteractable = grabInteractables[i];
+                if (grabInteractable == null || grabInteractable.name != cloneName)
+                    continue;
+
+                if (ReferenceEquals(grabInteractable, heldInteractable) || grabInteractable.isSelected)
+                    continue;
+
+                Destroy(grabInteractable.gameObject);
+            }
+        }
+
         void RefreshVisualState()
         {
             bool show = HasStock();
@@ -245,6 +366,30 @@ namespace CIS5680VRGame.Balls
             }
 
             return m_ResolvedEnergyCost;
+        }
+
+        int GetEffectivePersistentEnergyCost()
+        {
+            return Mathf.Max(0, GetResolvedEnergyCost() + m_PersistentEnergyCostModifier);
+        }
+
+        BallType GetResolvedBallType()
+        {
+            if (!m_HasResolvedBallType)
+            {
+                m_ResolvedBallType = ResolveBallType();
+                m_HasResolvedBallType = true;
+            }
+
+            return m_ResolvedBallType;
+        }
+
+        BallType ResolveBallType()
+        {
+            if (m_ThrowableBallPrefab != null && m_ThrowableBallPrefab.TryGetComponent<BallImpactEffect>(out var effect))
+                return effect.BallType;
+
+            return BallType.Teleport;
         }
     }
 }

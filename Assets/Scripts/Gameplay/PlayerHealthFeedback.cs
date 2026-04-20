@@ -9,6 +9,7 @@ using TMPro;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using CIS5680VRGame.Generation;
 using CIS5680VRGame.UI;
 
 namespace CIS5680VRGame.Gameplay
@@ -553,6 +554,7 @@ namespace CIS5680VRGame.Gameplay
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
             Scene activeScene = SceneManager.GetActiveScene();
+            RandomMazeRestartUtility.TryPrepareSameMapRestart(activeScene);
             SceneTransitionService.LoadScene(activeScene.name);
         }
 

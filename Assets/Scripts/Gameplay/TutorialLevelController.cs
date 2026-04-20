@@ -32,7 +32,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] GameObject m_TutorialGoal;
 
         [Header("Tutorial UI")]
-        [SerializeField] Vector2 m_MessagePanelSize = new(960f, 260f);
+        [SerializeField] Vector2 m_MessagePanelSize = new(780f, 260f);
         [SerializeField] Vector2 m_MessagePanelOffset = new(0f, 240f);
 
         GameObject m_MessageRoot;
@@ -368,27 +368,27 @@ namespace CIS5680VRGame.Gameplay
 
                 TutorialStep.SwitchMode => (
                     "Switch Movement",
-                    "Press X to swap movement modes. Try the alternate locomotion once to continue."),
+                    "Press X to swap movement modes.\n Try the alternate locomotion once to continue."),
 
                 TutorialStep.Sonar => (
                     "Use the Sonar Ball",
-                    "Grab a Sonar Ball and send its pulse wave into the glowing beacon to continue."),
+                    "Grab a Sonar Ball and send its pulse wave \n into the glowing beacon to continue."),
 
                 TutorialStep.Jump => (
                     "Jump Over Obstacles",
-                    "Press A to jump. You can jump twice before landing. Clear the obstacle ahead."),
+                    "Press A to jump. You can jump twice before landing. \n Clear the obstacle ahead."),
 
                 TutorialStep.Trap => (
                     "Avoid the Trap",
-                    "Use a Sonar Ball to reveal the trap floor, then cross on the safe side."),
+                    "Use a Sonar Ball to reveal the trap floor, \n then cross on the safe side."),
 
                 TutorialStep.Refill => (
                     "Recover Resources",
-                    "Stand on the energy refill pad to restore energy, or use the grab button to pick up the health device and recover health."),
+                    "Stand on the energy refill pad to restore energy, \n or use the grab button to pick up the health device \n and recover health."),
 
                 TutorialStep.Locator => (
                     "Ping the Goal",
-                    "Push the right thumbstick forward to scan for the refill station and the exit beacon."),
+                    "Push the right thumbstick forward to scan for the refill station \n and the exit beacon."),
 
                 TutorialStep.ReachGoal => (
                     "Tutorial Complete",
@@ -430,7 +430,7 @@ namespace CIS5680VRGame.Gameplay
             Canvas canvas = m_MessageRoot.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
             canvas.worldCamera = menuCamera;
-            canvas.planeDistance = Mathf.Max(menuCamera.nearClipPlane + 0.16f, 0.34f);
+            canvas.planeDistance = Mathf.Max(menuCamera.nearClipPlane + 0.16f, 0.7f);
             canvas.sortingOrder = 4200;
 
             CanvasScaler scaler = m_MessageRoot.AddComponent<CanvasScaler>();
@@ -475,7 +475,7 @@ namespace CIS5680VRGame.Gameplay
                 "Body",
                 panel.transform,
                 fontAsset,
-                26f,
+                22f,
                 FontStyles.Normal,
                 new Color(0.74f, 0.88f, 0.98f, 1f),
                 110f);

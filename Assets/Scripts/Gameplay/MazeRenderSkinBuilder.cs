@@ -14,6 +14,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Transform m_MazeRoot;
         [SerializeField] Transform m_BoundaryWallsRoot;
         [SerializeField] MeshFilter m_FloorMeshFilter;
+        [SerializeField] Transform m_FloorTilesRoot;
 
         [Header("Materials")]
         [SerializeField] Material m_SourceMaterial;
@@ -42,10 +43,17 @@ namespace CIS5680VRGame.Gameplay
                     m_MazeRoot = FindSceneObjectByName("Maze");
             }
 
+            if (m_FloorTilesRoot == null && m_MazeRoot != null)
+            {
+                Transform floorTilesRoot = FindRecursiveByName(m_MazeRoot, "Floors");
+                if (floorTilesRoot != null)
+                    m_FloorTilesRoot = floorTilesRoot;
+            }
+
             if (m_IncludeBoundaryWalls && m_BoundaryWallsRoot == null)
                 m_BoundaryWallsRoot = FindSceneObjectByName("MazeBoundaryWalls");
 
-            if (m_FloorMeshFilter == null)
+            if (m_FloorTilesRoot == null && m_FloorMeshFilter == null)
                 m_FloorMeshFilter = FindFloorMeshFilter();
 
             if (m_SourceMaterial == null)
@@ -53,6 +61,27 @@ namespace CIS5680VRGame.Gameplay
 
             if ((m_OutputMeshFilter == null || m_OutputMeshRenderer == null) && !string.IsNullOrWhiteSpace(m_OutputObjectName))
                 ResolveOutputComponentsFromChild();
+        }
+
+        public void ConfigureGeneratedMaze(
+            Transform mazeRoot,
+            Transform floorTilesRoot,
+            string outputMeshAssetPath,
+            string outputMaterialAssetPath)
+        {
+            m_MazeRoot = mazeRoot;
+            m_FloorTilesRoot = floorTilesRoot;
+            m_IncludeBoundaryWalls = false;
+            m_BoundaryWallsRoot = null;
+            m_FloorMeshFilter = null;
+
+            if (!string.IsNullOrWhiteSpace(outputMeshAssetPath))
+                m_OutputMeshAssetPath = outputMeshAssetPath;
+
+            if (!string.IsNullOrWhiteSpace(outputMaterialAssetPath))
+                m_OutputMaterialAssetPath = outputMaterialAssetPath;
+
+            AutoAssignSceneReferences();
         }
 
         void Reset()
@@ -179,9 +208,10 @@ namespace CIS5680VRGame.Gameplay
                 m_OutputMeshRenderer = child.GetComponent<MeshRenderer>();
         }
 
-#if UNITY_EDITOR
         const string PulseRevealShaderName = "SonarBounce/PulseReveal";
         static readonly int s_UseMeshGridUvId = Shader.PropertyToID("_UseMeshGridUv");
+        [System.NonSerialized] Mesh m_RuntimeMeshInstance;
+        [System.NonSerialized] Material m_RuntimeMaterialInstance;
 
         struct WallPatch
         {
@@ -240,43 +270,28 @@ namespace CIS5680VRGame.Gameplay
             public int EndIndex;
         }
 
-        internal void BuildRenderSkin()
+        public void BuildRuntimeRenderSkin()
         {
             AutoAssignSceneReferences();
+            ValidateRequiredGeometry();
 
-            if (m_MazeRoot == null)
-                throw new UnityException("Maze root is missing.");
+            Mesh renderMesh = GetOrCreateRuntimeMesh();
+            Material renderMaterial = GetOrCreateRuntimeMaterial();
+            EnsureOutputComponents(renderMesh, renderMaterial, false);
+            PopulateRenderMesh(renderMesh);
+        }
 
-            if (m_FloorMeshFilter == null || m_FloorMeshFilter.sharedMesh == null)
-                throw new UnityException("Floor MeshFilter is missing.");
+#if UNITY_EDITOR
+        public void BuildEditorRenderSkinAsset()
+        {
+            AutoAssignSceneReferences();
+            ValidateRequiredGeometry();
 
             Mesh renderMesh = GetOrCreateMeshAsset();
             Material renderMaterial = GetOrCreateOutputMaterial();
-            EnsureOutputComponents(renderMesh, renderMaterial);
-
-            List<FaceRecord> faceRecords = new();
-            AppendFloorPatch(faceRecords);
-
-            List<BoxCollider> wallColliders = CollectWallColliders();
-            AppendWallPatches(wallColliders, faceRecords);
-            AssignContinuousUvs(faceRecords);
-
-            List<Vector3> vertices = new();
-            List<Vector3> normals = new();
-            List<Vector2> uvs = new();
-            List<int> triangles = new();
-
-            for (int i = 0; i < faceRecords.Count; i++)
-                AppendFaceRecord(faceRecords[i], vertices, normals, uvs, triangles);
-
-            renderMesh.Clear();
-            renderMesh.name = Path.GetFileNameWithoutExtension(m_OutputMeshAssetPath);
-            renderMesh.indexFormat = vertices.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
-            renderMesh.SetVertices(vertices);
-            renderMesh.SetNormals(normals);
-            renderMesh.SetUVs(0, uvs);
-            renderMesh.SetTriangles(triangles, 0, true);
-            renderMesh.RecalculateBounds();
+            EnsureOutputComponents(renderMesh, renderMaterial, true);
+            PopulateRenderMesh(renderMesh);
+            ReleaseRuntimeInstances();
 
             EditorUtility.SetDirty(renderMesh);
             EditorUtility.SetDirty(m_OutputMeshFilter);
@@ -289,7 +304,7 @@ namespace CIS5680VRGame.Gameplay
         internal void SelectOrCreateBuilderOutput()
         {
             AutoAssignSceneReferences();
-            EnsureOutputComponents(null, null);
+            EnsureOutputComponents(null, null, true);
             if (m_OutputMeshFilter != null)
                 Selection.activeObject = m_OutputMeshFilter.gameObject;
         }
@@ -345,8 +360,83 @@ namespace CIS5680VRGame.Gameplay
             m_OutputMaterial = outputMaterial;
             return outputMaterial;
         }
+#endif
 
-        void EnsureOutputComponents(Mesh mesh, Material material)
+        void ValidateRequiredGeometry()
+        {
+            if (m_MazeRoot == null)
+                throw new UnityException("Maze root is missing.");
+
+            bool hasFloorMesh = m_FloorMeshFilter != null && m_FloorMeshFilter.sharedMesh != null;
+            bool hasFloorTiles = m_FloorTilesRoot != null && m_FloorTilesRoot.GetComponentsInChildren<BoxCollider>(true).Length > 0;
+            if (!hasFloorMesh && !hasFloorTiles)
+                throw new UnityException("Floor geometry is missing. Assign a floor mesh or floor tiles root.");
+        }
+
+        Mesh GetOrCreateRuntimeMesh()
+        {
+            if (m_RuntimeMeshInstance == null)
+            {
+                m_RuntimeMeshInstance = new Mesh
+                {
+                    name = $"{m_OutputObjectName}_RuntimeMesh",
+                    hideFlags = HideFlags.DontSaveInEditor | HideFlags.DontSaveInBuild
+                };
+            }
+
+            return m_RuntimeMeshInstance;
+        }
+
+        Material GetOrCreateRuntimeMaterial()
+        {
+            if (m_RuntimeMaterialInstance == null)
+            {
+                Material templateMaterial = m_OutputMaterial != null ? m_OutputMaterial : m_SourceMaterial;
+                if (templateMaterial == null)
+                    templateMaterial = FindDefaultSourceMaterial();
+
+                if (templateMaterial == null)
+                    throw new UnityException("Source material is missing. Assign one in the builder inspector.");
+
+                m_RuntimeMaterialInstance = new Material(templateMaterial)
+                {
+                    name = $"{templateMaterial.name}_Runtime",
+                    hideFlags = HideFlags.DontSaveInEditor | HideFlags.DontSaveInBuild
+                };
+            }
+
+            ForceUvGridMode(m_RuntimeMaterialInstance);
+            return m_RuntimeMaterialInstance;
+        }
+
+        void PopulateRenderMesh(Mesh renderMesh)
+        {
+            List<FaceRecord> faceRecords = new();
+            AppendFloorGeometry(faceRecords);
+
+            List<BoxCollider> wallColliders = CollectWallColliders();
+            AppendWallPatches(wallColliders, faceRecords);
+            AssignContinuousUvs(faceRecords);
+
+            List<Vector3> vertices = new();
+            List<Vector3> normals = new();
+            List<Vector2> uvs = new();
+            List<int> triangles = new();
+
+            for (int i = 0; i < faceRecords.Count; i++)
+                AppendFaceRecord(faceRecords[i], vertices, normals, uvs, triangles);
+
+            renderMesh.Clear();
+            renderMesh.name = string.IsNullOrWhiteSpace(m_OutputObjectName) ? "MazeRenderSkin" : m_OutputObjectName;
+            renderMesh.indexFormat = vertices.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
+            renderMesh.SetVertices(vertices);
+            renderMesh.SetNormals(normals);
+            renderMesh.SetUVs(0, uvs);
+            renderMesh.SetTriangles(triangles, 0, true);
+            renderMesh.RecalculateBounds();
+        }
+
+        void EnsureOutputComponents(Mesh mesh, Material material, bool recordUndo)
         {
             GameObject outputObject = m_OutputMeshFilter != null ? m_OutputMeshFilter.gameObject : null;
             if (outputObject == null)
@@ -358,7 +448,10 @@ namespace CIS5680VRGame.Gameplay
             if (outputObject == null)
             {
                 outputObject = new GameObject(m_OutputObjectName);
-                Undo.RegisterCreatedObjectUndo(outputObject, "Create Maze Render Skin");
+                #if UNITY_EDITOR
+                if (recordUndo)
+                    Undo.RegisterCreatedObjectUndo(outputObject, "Create Maze Render Skin");
+                #endif
                 outputObject.transform.SetParent(transform, false);
             }
 
@@ -366,11 +459,25 @@ namespace CIS5680VRGame.Gameplay
 
             m_OutputMeshFilter = outputObject.GetComponent<MeshFilter>();
             if (m_OutputMeshFilter == null)
-                m_OutputMeshFilter = Undo.AddComponent<MeshFilter>(outputObject);
+            {
+                #if UNITY_EDITOR
+                if (recordUndo)
+                    m_OutputMeshFilter = Undo.AddComponent<MeshFilter>(outputObject);
+                else
+                #endif
+                    m_OutputMeshFilter = outputObject.AddComponent<MeshFilter>();
+            }
 
             m_OutputMeshRenderer = outputObject.GetComponent<MeshRenderer>();
             if (m_OutputMeshRenderer == null)
-                m_OutputMeshRenderer = Undo.AddComponent<MeshRenderer>(outputObject);
+            {
+                #if UNITY_EDITOR
+                if (recordUndo)
+                    m_OutputMeshRenderer = Undo.AddComponent<MeshRenderer>(outputObject);
+                else
+                #endif
+                    m_OutputMeshRenderer = outputObject.AddComponent<MeshRenderer>();
+            }
 
             if (mesh != null)
                 m_OutputMeshFilter.sharedMesh = mesh;
@@ -384,7 +491,84 @@ namespace CIS5680VRGame.Gameplay
             m_OutputMeshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
         }
 
-        void AppendFloorPatch(List<FaceRecord> faceRecords)
+        void OnDestroy()
+        {
+            ReleaseRuntimeInstances();
+        }
+
+        void ReleaseRuntimeInstances()
+        {
+            DestroyTransientObject(m_RuntimeMeshInstance);
+            DestroyTransientObject(m_RuntimeMaterialInstance);
+            m_RuntimeMeshInstance = null;
+            m_RuntimeMaterialInstance = null;
+        }
+
+        static void DestroyTransientObject(Object transientObject)
+        {
+            if (transientObject == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(transientObject);
+            else
+                DestroyImmediate(transientObject);
+        }
+
+        void AppendFloorGeometry(List<FaceRecord> faceRecords)
+        {
+            if (TryAppendFloorTilePatches(faceRecords))
+                return;
+
+            AppendFloorMeshPatch(faceRecords);
+        }
+
+        bool TryAppendFloorTilePatches(List<FaceRecord> faceRecords)
+        {
+            if (m_FloorTilesRoot == null)
+                return false;
+
+            BoxCollider[] floorColliders = m_FloorTilesRoot.GetComponentsInChildren<BoxCollider>(true);
+            bool appendedAny = false;
+
+            for (int i = 0; i < floorColliders.Length; i++)
+            {
+                BoxCollider floorCollider = floorColliders[i];
+                if (floorCollider == null || !floorCollider.enabled)
+                    continue;
+
+                Renderer floorRenderer = floorCollider.GetComponent<Renderer>();
+                if (floorRenderer == null || !floorRenderer.enabled)
+                    continue;
+
+                Transform floorTransform = floorCollider.transform;
+                Vector3 center = floorTransform.TransformPoint(floorCollider.center);
+                Vector3 halfRight = floorTransform.TransformVector(Vector3.right * (floorCollider.size.x * 0.5f));
+                Vector3 halfUp = floorTransform.TransformVector(Vector3.up * (floorCollider.size.y * 0.5f));
+                Vector3 halfForward = floorTransform.TransformVector(Vector3.forward * (floorCollider.size.z * 0.5f));
+                Vector3 topCenter = center + halfUp;
+                Vector3 normal = floorTransform.TransformDirection(Vector3.up).normalized;
+                Vector3 offset = normal * m_SurfaceOffset;
+
+                AddFaceRecord(
+                    topCenter - halfRight - halfForward,
+                    topCenter + halfRight - halfForward,
+                    topCenter + halfRight + halfForward,
+                    topCenter - halfRight + halfForward,
+                    topCenter - halfRight - halfForward + offset,
+                    topCenter + halfRight - halfForward + offset,
+                    topCenter + halfRight + halfForward + offset,
+                    topCenter - halfRight + halfForward + offset,
+                    normal,
+                    faceRecords);
+
+                appendedAny = true;
+            }
+
+            return appendedAny;
+        }
+
+        void AppendFloorMeshPatch(List<FaceRecord> faceRecords)
         {
             Mesh floorMesh = m_FloorMeshFilter.sharedMesh;
             Transform floorTransform = m_FloorMeshFilter.transform;
@@ -432,11 +616,26 @@ namespace CIS5680VRGame.Gameplay
                 if (collider == null || !collider.enabled)
                     continue;
 
-                if (m_FloorMeshFilter != null && collider.transform == m_FloorMeshFilter.transform)
+                Renderer colliderRenderer = collider.GetComponent<Renderer>();
+                if (colliderRenderer == null || !colliderRenderer.enabled)
+                    continue;
+
+                if (IsFloorCollider(collider))
                     continue;
 
                 colliders.Add(collider);
             }
+        }
+
+        bool IsFloorCollider(BoxCollider collider)
+        {
+            if (collider == null)
+                return false;
+
+            if (m_FloorMeshFilter != null && collider.transform == m_FloorMeshFilter.transform)
+                return true;
+
+            return m_FloorTilesRoot != null && collider.transform.IsChildOf(m_FloorTilesRoot);
         }
 
         void AppendWallPatches(List<BoxCollider> wallColliders, List<FaceRecord> faceRecords)
@@ -1086,6 +1285,7 @@ namespace CIS5680VRGame.Gameplay
                 material.SetFloat(s_UseMeshGridUvId, 1f);
         }
 
+#if UNITY_EDITOR
         static string NormalizeAssetPath(string assetPath, string fallbackAssetPath, string requiredExtension)
         {
             string normalizedPath = string.IsNullOrWhiteSpace(assetPath) ? fallbackAssetPath : assetPath.Trim().Replace('\\', '/');
@@ -1145,12 +1345,24 @@ namespace CIS5680VRGame.Gameplay
                 builder.SelectOrCreateBuilderOutput();
             EditorGUILayout.EndHorizontal();
 
-            if (GUILayout.Button("Build / Rebuild Render Skin"))
+            if (GUILayout.Button("Build Runtime Preview"))
+            {
+                try
+                {
+                    builder.BuildRuntimeRenderSkin();
+                }
+                catch (UnityException ex)
+                {
+                    Debug.LogError(ex.Message, builder);
+                }
+            }
+
+            if (GUILayout.Button("Build / Rebuild Editor Render Skin Asset"))
             {
                 try
                 {
                     Undo.RecordObject(builder, "Build Maze Render Skin");
-                    builder.BuildRenderSkin();
+                    builder.BuildEditorRenderSkinAsset();
                 }
                 catch (UnityException ex)
                 {

@@ -12,6 +12,7 @@ namespace CIS5680VRGame.Gameplay
             new Keyframe(1f, 1f));
 
         static AudioClip s_BeaconClip;
+        static float s_ExternalVolumeMultiplier = 1f;
 
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField, Range(0f, 1f)] float m_FarVolume = 0.045f;
@@ -31,6 +32,11 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             target.AddComponent<GoalBeaconAmbientAudio>();
+        }
+
+        public static void SetExternalVolumeMultiplier(float multiplier)
+        {
+            s_ExternalVolumeMultiplier = Mathf.Clamp01(multiplier);
         }
 
         void Awake()
@@ -141,10 +147,11 @@ namespace CIS5680VRGame.Gameplay
             float rampDistance = Mathf.Max(0.01f, m_VolumeRampDistance);
             float t = 1f - Mathf.Clamp01(distance / rampDistance);
             t = Mathf.SmoothStep(0f, 1f, t);
-            return Mathf.Lerp(
+            float baseVolume = Mathf.Lerp(
                 Mathf.Clamp01(m_FarVolume),
                 Mathf.Clamp01(m_NearVolume),
                 t);
+            return baseVolume * s_ExternalVolumeMultiplier;
         }
 
         bool IsGoalCompleted()

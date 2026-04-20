@@ -10,6 +10,7 @@ using XRCommonUsages = UnityEngine.XR.CommonUsages;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using CIS5680VRGame.Generation;
 using CIS5680VRGame.UI;
 
 namespace CIS5680VRGame.Gameplay
@@ -150,6 +151,7 @@ namespace CIS5680VRGame.Gameplay
         {
             ResumeGameplay();
             Scene activeScene = SceneManager.GetActiveScene();
+            RandomMazeRestartUtility.TryPrepareSameMapRestart(activeScene);
             SceneTransitionService.LoadScene(activeScene.name);
         }
 
@@ -241,16 +243,6 @@ namespace CIS5680VRGame.Gameplay
                 FontStyles.Bold,
                 new Color(0.92f, 0.98f, 1f, 1f),
                 110f);
-
-            CreateLabel(
-                "Message",
-                panel.transform,
-                "Choose your next step.",
-                fontAsset,
-                30f,
-                FontStyles.Normal,
-                new Color(0.72f, 0.86f, 0.96f, 1f),
-                72f);
 
             GameObject buttonColumn = ModalMenuPauseUtility.CreateUIObject("Buttons", panel.transform);
             VerticalLayoutGroup buttonLayout = buttonColumn.AddComponent<VerticalLayoutGroup>();

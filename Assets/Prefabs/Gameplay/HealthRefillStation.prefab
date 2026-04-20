@@ -328,15 +328,22 @@ MonoBehaviour:
   m_PlayerRig: {fileID: 0}
   m_PulseVisual: {fileID: 7464434501638269775}
   m_GlowLight: {fileID: 8484749922032518954}
-  m_Cooldown: 5
+  m_OverrideSharedDefaults: 0
+  m_MaxUses: 2
+  m_BaseRestoreAmount: 50
+  m_Cooldown: 20
   m_ReadyBackgroundColor: {r: 0.02, g: 0.14, b: 0.05, a: 1}
   m_ReadyPulseColor: {r: 0.38, g: 1, b: 0.46, a: 1}
   m_CooldownBackgroundColor: {r: 0.05, g: 0.05, b: 0.05, a: 1}
   m_CooldownPulseColor: {r: 0.26, g: 0.28, b: 0.28, a: 1}
+  m_DepletedBackgroundColor: {r: 0.12, g: 0.03, b: 0.03, a: 1}
+  m_DepletedPulseColor: {r: 0.8, g: 0.24, b: 0.18, a: 1}
   m_ReadyEmissionStrength: 3.2
   m_CooldownEmissionStrength: 1.2
+  m_DepletedEmissionStrength: 0.75
   m_ReadyLightIntensity: 1.45
   m_CooldownLightIntensity: 0.25
+  m_DepletedLightIntensity: 0.12
   m_LightPulseAmplitude: 0.22
   m_LightPulseFrequency: 2.2
   m_UseHapticsAmplitude: 0.3
@@ -347,11 +354,13 @@ MonoBehaviour:
   m_HoverPromptFontSize: 72
   m_HoverPromptReadyColor: {r: 0.92, g: 1, b: 0.94, a: 1}
   m_HoverPromptCooldownColor: {r: 1, g: 0.62, b: 0.24, a: 1}
+  m_HoverPromptDepletedColor: {r: 1, g: 0.44, b: 0.4, a: 1}
   m_HoverPromptOutlineColor: {r: 0, g: 0, b: 0, a: 0.88}
   m_HoverPromptPanelColor: {r: 0.03, g: 0.04, b: 0.04, a: 0.88}
   m_HoverPromptPanelBorderColor: {r: 0.86, g: 0.96, b: 0.9, a: 0.92}
   m_ReadyPromptText: Press Grip to Restore Health
   m_CooldownPromptFormat: Recharging... {0:0.0}s
+  m_DepletedPromptText: Health station depleted
   m_OrbVisualRoot: {fileID: 0}
   m_CooldownWarningBackgroundColor: {r: 0.12, g: 0.02, b: 0.02, a: 1}
   m_CooldownWarningPulseColorA: {r: 0.62, g: 0.1, b: 0.08, a: 1}

@@ -6,6 +6,7 @@ namespace CIS5680VRGame.Gameplay
     public class MazeEditorSceneOverlay : MonoBehaviour
     {
         [SerializeField] bool m_ShowOverlay = true;
+        [SerializeField] bool m_ShowOverlayDuringPlayMode;
         [SerializeField] bool m_AutoCollectColliders = true;
         [SerializeField] Collider[] m_TargetColliders = Array.Empty<Collider>();
 
@@ -34,7 +35,10 @@ namespace CIS5680VRGame.Gameplay
 
         void OnDrawGizmos()
         {
-            if (!m_ShowOverlay || Application.isPlaying)
+            if (!m_ShowOverlay)
+                return;
+
+            if (Application.isPlaying && !m_ShowOverlayDuringPlayMode)
                 return;
 
             if (Camera.current != null && Camera.current.cameraType != CameraType.SceneView)
@@ -129,6 +133,11 @@ namespace CIS5680VRGame.Gameplay
 
             Gizmos.color = isFloor ? m_FloorOutlineColor : m_WallOutlineColor;
             Gizmos.DrawWireCube(bounds.center, bounds.size);
+        }
+
+        public void SetShowOverlayDuringPlayMode(bool value)
+        {
+            m_ShowOverlayDuringPlayMode = value;
         }
     }
 }

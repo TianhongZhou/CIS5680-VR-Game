@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3e2f8d8ce8b147c4869c2ad6887bc271, type: 3}
+  m_Name: EnemyPatrolSharedSettings
+  m_EditorClassIdentifier: 
+  m_Profile:
+    PatrolSpeed: 0.7
+    ChaseSpeed: 1.1
+    PhysicsMass: 250
+    ExternalPushDrag: 10
+    ExternalPushAngularDrag: 10
+    ClosePursuitDistance: 4.75
+    ClosePursuitModuleDistance: 1
+    RotationSpeed: 14
+    DirectionSmoothing: 14
+    EyeTrackingSmoothing: 14
+    DetectionRange: 12
+    PursuitLockDistance: 6
+    OccludedSoftLockDistance: 6
+    PursuitTurnSlowdownAngle: 55
+    PursuitTurnInPlaceAngle: 110
+    FieldOfViewDegrees: 160
+    LoseSightGraceDuration: 1.6
+    SearchWaitDuration: 5
+    SearchSweepAngle: 60
+    SearchSweepFrequency: 0.75
+    PatrolRadius: 5.25
+    DirectionChangeIntervalMin: 1.2
+    DirectionChangeIntervalMax: 3
+    AnchorPullDistance: 4.1
+    ObstacleProbeDistance: 1.2
+    ObstacleProbeRadius: 0.36
+    ObstacleProbeHeight: 1.18
+    ObstacleAvoidanceAngle: 58
+    ObstacleMask:
+      serializedVersion: 2
+      m_Bits: 4294967295
+    BobAmplitude: 0.06
+    BobFrequency: 2.3
+    EyeOrbitRadius: 0.52
+    EyeOrbitHeight: 0.744
+    EyeVerticalLead: 0.12
+    CorridorCenteringSpeed: 3.1
+    PathNodeArrivalDistance: 0.4

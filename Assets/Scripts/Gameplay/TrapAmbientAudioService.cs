@@ -8,6 +8,7 @@ namespace CIS5680VRGame.Gameplay
         const string TrapLoopClipPath = "Audio/Gameplay/Gameplay_MazeTrapLoop";
 
         static TrapAmbientAudioService s_Instance;
+        static float s_ExternalVolumeMultiplier = 1f;
 
         AudioSource m_AudioSource;
         AudioClip m_TrapLoopClip;
@@ -26,7 +27,19 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             var root = new GameObject("TrapAmbientAudioService");
+            DontDestroyOnLoad(root);
             s_Instance = root.AddComponent<TrapAmbientAudioService>();
+        }
+
+        public static void SetExternalVolumeMultiplier(float multiplier)
+        {
+            s_ExternalVolumeMultiplier = Mathf.Clamp01(multiplier);
+        }
+
+        void OnDestroy()
+        {
+            if (s_Instance == this)
+                s_Instance = null;
         }
 
         void Awake()
@@ -90,6 +103,8 @@ namespace CIS5680VRGame.Gameplay
             bool hasTarget = PlayerDamageTrap.TryGetAmbientTarget(m_ListenerTransform, out float targetVolume, out float smoothTime);
             if (!hasTarget)
                 targetVolume = 0f;
+
+            targetVolume *= s_ExternalVolumeMultiplier;
 
             m_AudioSource.volume = Mathf.SmoothDamp(
                 m_AudioSource.volume,
