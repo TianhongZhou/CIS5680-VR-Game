@@ -38,6 +38,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] float m_DisplayDuration = 5f;
         [SerializeField] float m_MaxPingDistance = SharedDefaults.BasePingDistance;
         [SerializeField] float m_MaxCoinPingDistance = 0f;
+        [SerializeField] float m_MaxEnemyPingDistance = 0f;
         [SerializeField] float m_ConeAngle = 120f;
         [SerializeField] float m_ForwardThreshold = 0.55f;
         [SerializeField] float m_ResetThreshold = 0.2f;
@@ -64,6 +65,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Color m_GoalCompletedColor = new(0.22f, 1f, 0.72f, 0.92f);
         [SerializeField] Color m_HealthRefillColor = new(0.38f, 1f, 0.46f, 0.94f);
         [SerializeField] Color m_CoinColor = new(1f, 0.86f, 0.22f, 0.94f);
+        [SerializeField] Color m_EnemyColor = new(1f, 0.24f, 0.24f, 0.96f);
         [SerializeField] Color m_SectorShellColor = new(0.98f, 0.74f, 0.24f, 0.38f);
 
         readonly List<XRBaseInteractor> m_PlayerInteractors = new();
@@ -77,6 +79,7 @@ namespace CIS5680VRGame.Gameplay
         float m_BaseCooldown;
         float m_BaseMaxPingDistance;
         int m_PersistentCoinSenseRangeMeters;
+        int m_PersistentEnemySenseRangeMeters;
         int m_PersistentLocatorSupportSenseRangeMeters;
         bool m_CanDetectSupportStations;
         bool m_ForwardInputLatched;
@@ -92,6 +95,7 @@ namespace CIS5680VRGame.Gameplay
             HealthRefillStation,
             Goal,
             CoinReward,
+            Enemy,
         }
 
         sealed class LocatorMarker
@@ -101,6 +105,7 @@ namespace CIS5680VRGame.Gameplay
             public HealthRefillStation HealthStation;
             public LevelGoalTrigger Goal;
             public RewardPickup RewardPickup;
+            public EnemyPatrolController Enemy;
             public GameObject RootObject;
             public Transform PadTransform;
             public MeshRenderer PadRenderer;
@@ -185,6 +190,14 @@ namespace CIS5680VRGame.Gameplay
         public void ApplyPersistentLocatorSupportSenseRangeMeters(int rangeMeters)
         {
             m_PersistentLocatorSupportSenseRangeMeters = Mathf.Max(0, rangeMeters);
+            RecomputePersistentSenseState();
+            RefreshMarkers(forceRebuild: true);
+            HideAllMarkers();
+        }
+
+        public void ApplyPersistentEnemySenseRangeMeters(int rangeMeters)
+        {
+            m_PersistentEnemySenseRangeMeters = Mathf.Max(0, rangeMeters);
             RecomputePersistentSenseState();
             RefreshMarkers(forceRebuild: true);
             HideAllMarkers();
@@ -371,14 +384,15 @@ namespace CIS5680VRGame.Gameplay
             var healthStations = GetActiveLocatorHealthStations();
             var goals = FindActiveObjects<LevelGoalTrigger>();
             var rewards = GetActiveCoinRewards();
-            int targetCount = stations.Length + healthStations.Length + goals.Length + rewards.Length;
+            var enemies = GetActiveThreats();
+            int targetCount = stations.Length + healthStations.Length + goals.Length + rewards.Length + enemies.Length;
 
             if (!forceRebuild && targetCount == m_LocatorMarkers.Count)
             {
                 bool matches = true;
                 for (int i = 0; i < m_LocatorMarkers.Count; i++)
                 {
-                    if (MarkerMatchesSceneObjects(m_LocatorMarkers[i], stations, healthStations, goals, rewards))
+                    if (MarkerMatchesSceneObjects(m_LocatorMarkers[i], stations, healthStations, goals, rewards, enemies))
                         continue;
 
                     matches = false;
@@ -425,9 +439,17 @@ namespace CIS5680VRGame.Gameplay
 
                 m_LocatorMarkers.Add(CreateRewardMarker(rewards[i]));
             }
+
+            for (int i = 0; i < enemies.Length; i++)
+            {
+                if (enemies[i] == null)
+                    continue;
+
+                m_LocatorMarkers.Add(CreateEnemyMarker(enemies[i]));
+            }
         }
 
-        bool MarkerMatchesSceneObjects(LocatorMarker marker, BallRefillStation[] stations, HealthRefillStation[] healthStations, LevelGoalTrigger[] goals, RewardPickup[] rewards)
+        bool MarkerMatchesSceneObjects(LocatorMarker marker, BallRefillStation[] stations, HealthRefillStation[] healthStations, LevelGoalTrigger[] goals, RewardPickup[] rewards, EnemyPatrolController[] enemies)
         {
             if (marker == null)
                 return false;
@@ -438,6 +460,7 @@ namespace CIS5680VRGame.Gameplay
                 LocatorMarkerKind.HealthRefillStation => marker.HealthStation != null && System.Array.IndexOf(healthStations, marker.HealthStation) >= 0,
                 LocatorMarkerKind.Goal => marker.Goal != null && System.Array.IndexOf(goals, marker.Goal) >= 0,
                 LocatorMarkerKind.CoinReward => marker.RewardPickup != null && System.Array.IndexOf(rewards, marker.RewardPickup) >= 0,
+                LocatorMarkerKind.Enemy => marker.Enemy != null && System.Array.IndexOf(enemies, marker.Enemy) >= 0,
                 _ => false,
             };
         }
@@ -504,7 +527,54 @@ namespace CIS5680VRGame.Gameplay
             return CreateMarker(rewardPickup.name, LocatorMarkerKind.CoinReward, null, null, rewardPickup);
         }
 
-        LocatorMarker CreateMarker(string markerName, LocatorMarkerKind kind, BallRefillStation station, LevelGoalTrigger goal, RewardPickup rewardPickup = null, HealthRefillStation healthStation = null)
+        LocatorMarker CreateEnemyMarker(EnemyPatrolController enemy)
+        {
+            var markerRoot = new GameObject($"{enemy.name}_LocatorHighlight");
+            markerRoot.hideFlags = HideFlags.DontSave;
+            markerRoot.SetActive(false);
+
+            var marker = new LocatorMarker
+            {
+                Kind = LocatorMarkerKind.Enemy,
+                Enemy = enemy,
+                RootObject = markerRoot,
+                VisibleFrom = 0f,
+                VisibleUntil = 0f,
+            };
+
+            var enemyRenderers = enemy.GetComponentsInChildren<MeshRenderer>(true);
+            for (int i = 0; i < enemyRenderers.Length; i++)
+            {
+                MeshRenderer sourceRenderer = enemyRenderers[i];
+                if (sourceRenderer == null)
+                    continue;
+
+                MeshFilter sourceFilter = sourceRenderer.GetComponent<MeshFilter>();
+                if (sourceFilter == null || sourceFilter.sharedMesh == null)
+                    continue;
+
+                Transform highlightTransform = CreateHighlightMesh(
+                    $"{sourceRenderer.name}_EnemyHighlight",
+                    markerRoot.transform,
+                    sourceFilter.sharedMesh,
+                    out MeshRenderer highlightRenderer);
+
+                marker.GoalMeshParts.Add(new GoalMeshPart
+                {
+                    SourceTransform = sourceRenderer.transform,
+                    SourceRenderer = sourceRenderer,
+                    HighlightTransform = highlightTransform,
+                    HighlightRenderer = highlightRenderer,
+                });
+            }
+
+            if (marker.GoalMeshParts.Count == 0)
+                return CreateMarker(enemy.name, LocatorMarkerKind.Enemy, null, null, null, null, enemy);
+
+            return marker;
+        }
+
+        LocatorMarker CreateMarker(string markerName, LocatorMarkerKind kind, BallRefillStation station, LevelGoalTrigger goal, RewardPickup rewardPickup = null, HealthRefillStation healthStation = null, EnemyPatrolController enemy = null)
         {
             var markerRoot = new GameObject($"{markerName}_LocatorHighlight");
             markerRoot.hideFlags = HideFlags.DontSave;
@@ -526,6 +596,7 @@ namespace CIS5680VRGame.Gameplay
                 HealthStation = healthStation,
                 Goal = goal,
                 RewardPickup = rewardPickup,
+                Enemy = enemy,
                 RootObject = markerRoot,
                 PadTransform = padTransform,
                 PadRenderer = padRenderer,
@@ -756,7 +827,7 @@ namespace CIS5680VRGame.Gameplay
 
         void UpdateMarkerTransform(LocatorMarker marker)
         {
-            if (marker.Kind == LocatorMarkerKind.Goal)
+            if (marker.GoalMeshParts.Count > 0)
             {
                 UpdateGoalMarkerTransforms(marker);
                 return;
@@ -817,7 +888,7 @@ namespace CIS5680VRGame.Gameplay
             Color animatedColor = Color.Lerp(targetColor, Color.white, 0.12f * wave);
             animatedColor.a = targetColor.a * Mathf.Lerp(0.85f, 1f, wave);
 
-            if (marker.Kind == LocatorMarkerKind.Goal)
+            if (marker.GoalMeshParts.Count > 0)
             {
                 for (int i = 0; i < marker.GoalMeshParts.Count; i++)
                 {
@@ -878,6 +949,7 @@ namespace CIS5680VRGame.Gameplay
                 LocatorMarkerKind.HealthRefillStation => marker.HealthStation != null ? marker.HealthStation.transform : null,
                 LocatorMarkerKind.Goal => marker.Goal != null ? marker.Goal.transform : null,
                 LocatorMarkerKind.CoinReward => marker.RewardPickup != null ? marker.RewardPickup.transform : null,
+                LocatorMarkerKind.Enemy => marker.Enemy != null ? marker.Enemy.transform : null,
                 _ => null,
             };
         }
@@ -890,6 +962,7 @@ namespace CIS5680VRGame.Gameplay
                 LocatorMarkerKind.HealthRefillStation => m_HealthRefillColor,
                 LocatorMarkerKind.Goal => marker.Goal != null && marker.Goal.HasCompleted ? m_GoalCompletedColor : m_GoalColor,
                 LocatorMarkerKind.CoinReward => m_CoinColor,
+                LocatorMarkerKind.Enemy => m_EnemyColor,
                 _ => m_UnvisitedColor,
             };
         }
@@ -899,6 +972,7 @@ namespace CIS5680VRGame.Gameplay
             return marker.Kind switch
             {
                 LocatorMarkerKind.CoinReward => Mathf.Max(0f, m_MaxCoinPingDistance),
+                LocatorMarkerKind.Enemy => Mathf.Max(0f, m_MaxEnemyPingDistance),
                 _ => Mathf.Max(0.01f, m_MaxPingDistance),
             };
         }
@@ -920,6 +994,25 @@ namespace CIS5680VRGame.Gameplay
             }
 
             return coinRewards.ToArray();
+        }
+
+        EnemyPatrolController[] GetActiveThreats()
+        {
+            if (m_MaxEnemyPingDistance <= 0.01f)
+                return Array.Empty<EnemyPatrolController>();
+
+            EnemyPatrolController[] allEnemies = FindActiveObjects<EnemyPatrolController>();
+            List<EnemyPatrolController> activeThreats = new(allEnemies.Length);
+            for (int i = 0; i < allEnemies.Length; i++)
+            {
+                EnemyPatrolController enemy = allEnemies[i];
+                if (enemy == null || !enemy.isActiveAndEnabled)
+                    continue;
+
+                activeThreats.Add(enemy);
+            }
+
+            return activeThreats.ToArray();
         }
 
         BallRefillStation[] GetActiveLocatorStations()
@@ -965,6 +1058,7 @@ namespace CIS5680VRGame.Gameplay
             m_CanDetectSupportStations = m_PersistentLocatorSupportSenseRangeMeters > 0;
             m_MaxPingDistance = Mathf.Max(0.01f, m_BaseMaxPingDistance + Mathf.Max(0, m_PersistentLocatorSupportSenseRangeMeters));
             m_MaxCoinPingDistance = Mathf.Clamp(m_PersistentCoinSenseRangeMeters, 0f, Mathf.Max(0.01f, m_MaxPingDistance - 1f));
+            m_MaxEnemyPingDistance = Mathf.Clamp(m_PersistentEnemySenseRangeMeters, 0f, Mathf.Max(0.01f, m_MaxPingDistance - 1f));
         }
 
         void TriggerSectorShell(Vector3 origin, Vector3 forward)

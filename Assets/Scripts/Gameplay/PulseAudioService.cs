@@ -33,6 +33,7 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             var root = new GameObject("PulseAudioService");
+            DontDestroyOnLoad(root);
             s_Instance = root.AddComponent<PulseAudioService>();
         }
 

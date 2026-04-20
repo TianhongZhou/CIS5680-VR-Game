@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using CIS5680VRGame.Balls;
 using CIS5680VRGame.Gameplay;
@@ -26,6 +27,7 @@ namespace CIS5680VRGame.Generation
         const string DefaultGoalPrefabPath = "Assets/Prefabs/Gameplay/MazeGoalBeacon.prefab";
         const string DefaultStartPrefabPath = "Assets/Prefabs/Gameplay/MazeStartPad.prefab";
         const string DefaultHealthRefillPrefabPath = "Assets/Prefabs/Gameplay/HealthRefillStation.prefab";
+        const string DefaultRobotScoutEnemyPrefabPath = "Assets/Prefabs/Enemies/RobotScoutEnemy.prefab";
         const string DefaultRenderSkinMeshAssetPath = "Assets/Generated/Maze/RandomMazeRenderSkin.asset";
         const string DefaultRenderSkinMaterialAssetPath = "Assets/Generated/Maze/M_RandomMazeRenderSkinPulse.mat";
         const string GroundLayerName = "Ground";
@@ -45,6 +47,8 @@ namespace CIS5680VRGame.Generation
         [SerializeField] Material m_WallRevealMaterial;
         [SerializeField] Material m_EditorPreviewFloorMaterial;
         [SerializeField] Material m_EditorPreviewWallMaterial;
+        [SerializeField] MazeModuleNavigationAuthoring m_DefaultNavigationAuthoring;
+        [SerializeField] List<MazeRoleNavigationAuthoringOverride> m_RoleNavigationAuthoringOverrides = new();
 
         [Header("Graybox Dimensions")]
         [SerializeField, Min(1f)] float m_CellSize = 4f;
@@ -67,10 +71,27 @@ namespace CIS5680VRGame.Generation
         [SerializeField, Min(1)] int m_DefaultRewardAmount = 1;
         [SerializeField, Min(0.05f)] float m_RewardTriggerRadius = 0.7f;
 
+        [Header("Enemy Prototype")]
+        [SerializeField] GameObject m_RobotScoutEnemyPrefab;
+        [SerializeField] Vector3 m_EnemyLocalOffset = Vector3.zero;
+        [SerializeField, Min(0.5f)] float m_EnemyPatrolRadius = 10f;
+
         [Header("Markers")]
         [SerializeField] bool m_BuildRoleMarkers = true;
         [SerializeField, Min(0.1f)] float m_RoleMarkerHeight = 1.1f;
         [SerializeField, Min(0.1f)] float m_RoleMarkerDiameter = 0.5f;
+
+        Vector3 m_LastResolvedOrigin;
+        bool m_HasResolvedOrigin;
+        readonly Dictionary<Vector2Int, MazePlacedModuleNavigationData> m_PlacedNavigationModules = new();
+
+        public float CellSize => m_CellSize;
+        public bool HasResolvedPlacementOrigin => m_HasResolvedOrigin;
+        public Vector3 ResolvedPlacementOrigin => m_HasResolvedOrigin ? m_LastResolvedOrigin : ResolvePlacementOrigin();
+        public bool TryGetPlacedModuleNavigationData(Vector2Int gridPosition, out MazePlacedModuleNavigationData data)
+        {
+            return m_PlacedNavigationModules.TryGetValue(gridPosition, out data);
+        }
 
         public void BuildModules(MazeLayout layout, MazeRunBootstrap bootstrap)
         {
@@ -79,6 +100,8 @@ namespace CIS5680VRGame.Generation
 
             AutoAssignDefaultAssets();
             ResolveTemplates();
+            CachePlacementOrigin();
+            m_PlacedNavigationModules.Clear();
 
             Transform grayboxRoot = EnsureChild(bootstrap.ModulesRoot, GrayboxRootName);
             RemoveLegacyChild(grayboxRoot, MarkersRootName);
@@ -98,6 +121,7 @@ namespace CIS5680VRGame.Generation
             ClearChildren(bootstrap.HazardsRoot);
             ClearChildren(bootstrap.RefillsRoot);
             ClearChildren(bootstrap.RewardsRoot);
+            ClearChildren(bootstrap.EnemiesRoot);
             ClearChildren(bootstrap.GoalRoot);
 
             EnsureGeneratedPreviewTools(grayboxRoot, floorsRoot);
@@ -107,7 +131,8 @@ namespace CIS5680VRGame.Generation
                 MazeCellData cell = layout.Cells[i];
                 CreateFloor(floorsRoot, cell);
                 BuildCellWalls(wallsRoot, layout, cell);
-                PlaceSpecialObject(bootstrap, startRoot, cell);
+                GameObject placedSpecialObject = PlaceSpecialObject(bootstrap, startRoot, cell);
+                RegisterPlacedModuleNavigation(cell, placedSpecialObject);
 
                 if (m_BuildRoleMarkers && ShouldCreateRoleMarker(cell))
                     CreateRoleMarker(markersRoot, cell);
@@ -115,6 +140,7 @@ namespace CIS5680VRGame.Generation
 
             CreateSupportSlab(supportRoot, layout);
             RebuildRenderSkin(grayboxRoot, floorsRoot);
+            PlacePrototypeEnemies(layout, bootstrap);
         }
 
         void Reset()
@@ -211,57 +237,53 @@ namespace CIS5680VRGame.Generation
                 wallRenderer.sharedMaterial = ResolveWallMaterial();
         }
 
-        void PlaceSpecialObject(MazeRunBootstrap bootstrap, Transform startRoot, MazeCellData cell)
+        GameObject PlaceSpecialObject(MazeRunBootstrap bootstrap, Transform startRoot, MazeCellData cell)
         {
             switch (cell.Role)
             {
                 case MazeCellRole.Start:
-                    InstantiateTemplate(
+                    return InstantiateTemplate(
                         m_StartPrefab,
                         startRoot,
                         cell,
                         "GeneratedStartPad",
                         m_StartLocalOffset);
-                    break;
                 case MazeCellRole.Goal:
-                    InstantiateTemplate(
+                    return InstantiateTemplate(
                         m_GoalPrefab,
                         bootstrap.GoalRoot,
                         cell,
                         "GeneratedGoalBeacon",
                         m_GoalLocalOffset);
-                    break;
                 case MazeCellRole.Refill:
-                    InstantiateTemplate(
+                    return InstantiateTemplate(
                         m_RefillTemplate != null ? m_RefillTemplate.gameObject : null,
                         bootstrap.RefillsRoot,
                         cell,
                         $"GeneratedRefill_{cell.GridPosition.x}_{cell.GridPosition.y}",
                         m_RefillLocalOffset);
-                    break;
                 case MazeCellRole.HealthRefill:
-                    InstantiateTemplate(
+                    return InstantiateTemplate(
                         m_HealthRefillTemplate != null ? m_HealthRefillTemplate.gameObject : null,
                         bootstrap.RefillsRoot,
                         cell,
                         $"GeneratedHealthRefill_{cell.GridPosition.x}_{cell.GridPosition.y}",
                         m_HealthRefillLocalOffset);
-                    break;
                 case MazeCellRole.Trap:
-                    InstantiateTemplate(
+                    return InstantiateTemplate(
                         m_TrapPrefab,
                         bootstrap.HazardsRoot,
                         cell,
                         $"GeneratedTrap_{cell.GridPosition.x}_{cell.GridPosition.y}",
                         m_TrapLocalOffset);
-                    break;
                 case MazeCellRole.Reward:
-                    CreateRewardPlaceholder(
+                    return CreateRewardPlaceholder(
                         bootstrap.RewardsRoot,
                         cell,
                         $"GeneratedReward_{cell.GridPosition.x}_{cell.GridPosition.y}");
-                    break;
             }
+
+            return null;
         }
 
         GameObject InstantiateTemplate(
@@ -284,10 +306,10 @@ namespace CIS5680VRGame.Generation
             return instance;
         }
 
-        void CreateRewardPlaceholder(Transform parent, MazeCellData cell, string instanceName)
+        GameObject CreateRewardPlaceholder(Transform parent, MazeCellData cell, string instanceName)
         {
             if (parent == null)
-                return;
+                return null;
 
             var rewardRoot = new GameObject(instanceName);
             rewardRoot.transform.SetParent(parent, false);
@@ -336,6 +358,8 @@ namespace CIS5680VRGame.Generation
                 new Color(0.14f, 0.09f, 0.02f, 1f),
                 new Color(1f, 0.78f, 0.18f, 1f),
                 3f);
+
+            return rewardRoot;
         }
 
         void CreateRoleMarker(Transform parent, MazeCellData cell)
@@ -382,6 +406,141 @@ namespace CIS5680VRGame.Generation
             return cell.Role == MazeCellRole.Start && m_StartPrefab == null;
         }
 
+        void RegisterPlacedModuleNavigation(MazeCellData cell, GameObject placedSpecialObject)
+        {
+            if (cell == null)
+                return;
+
+            MazeModuleNavigationAuthoring authoring = ResolveNavigationAuthoringSource(cell, placedSpecialObject);
+            var resolvedPortals = new List<MazeNavigationPortalDefinition>();
+            var resolvedLocalNodes = new List<MazeNavigationLocalNodeDefinition>();
+            var resolvedLocalEdges = new List<MazeNavigationLocalEdgeDefinition>();
+            Vector3 worldCenter = ResolveCellWorldPosition(cell.GridPosition);
+            Quaternion worldRotation = ResolveNavigationRotation(placedSpecialObject);
+            Vector3 worldScale = Vector3.one;
+            Bounds moduleBounds = ResolveModuleBounds(worldCenter);
+            Bounds walkableBounds = ResolveWalkableBounds(authoring, worldCenter, worldRotation, worldScale, moduleBounds);
+            string sourceName = ResolveNavigationSourceName(cell, authoring, placedSpecialObject);
+            MazeNavigationAreaTag defaultAreaTag = authoring != null
+                ? authoring.DefaultAreaTag
+                : ResolveFallbackAreaTag(cell);
+            int navigationLayer = authoring != null ? authoring.NavigationLayer : 0;
+
+            if (authoring != null)
+            {
+                authoring.GetResolvedPortals(Mathf.Max(0.01f, m_CellSize), resolvedPortals);
+                authoring.GetResolvedLocalNodes(Mathf.Max(0.01f, m_CellSize), resolvedLocalNodes);
+                authoring.GetResolvedLocalEdges(Mathf.Max(0.01f, m_CellSize), resolvedLocalEdges);
+            }
+
+            m_PlacedNavigationModules[cell.GridPosition] = new MazePlacedModuleNavigationData(
+                cell.GridPosition,
+                sourceName,
+                worldCenter,
+                worldRotation,
+                worldScale,
+                moduleBounds,
+                walkableBounds,
+                defaultAreaTag,
+                navigationLayer,
+                authoring,
+                resolvedPortals,
+                resolvedLocalNodes,
+                resolvedLocalEdges);
+        }
+
+        MazeModuleNavigationAuthoring ResolveNavigationAuthoringSource(MazeCellData cell, GameObject placedSpecialObject)
+        {
+            if (placedSpecialObject != null)
+            {
+                MazeModuleNavigationAuthoring instanceAuthoring = placedSpecialObject.GetComponentInChildren<MazeModuleNavigationAuthoring>(true);
+                if (instanceAuthoring != null)
+                    return instanceAuthoring;
+            }
+
+            for (int i = 0; i < m_RoleNavigationAuthoringOverrides.Count; i++)
+            {
+                MazeRoleNavigationAuthoringOverride roleOverride = m_RoleNavigationAuthoringOverrides[i];
+                if (roleOverride.role == cell.Role && roleOverride.authoring != null)
+                    return roleOverride.authoring;
+            }
+
+            return m_DefaultNavigationAuthoring;
+        }
+
+        static string ResolveNavigationSourceName(MazeCellData cell, MazeModuleNavigationAuthoring authoring, GameObject placedSpecialObject)
+        {
+            if (authoring != null)
+                return authoring.ModuleId;
+
+            if (placedSpecialObject != null)
+                return placedSpecialObject.name;
+
+            return cell != null
+                ? $"Cell_{cell.GridPosition.x}_{cell.GridPosition.y}"
+                : "Cell";
+        }
+
+        static Quaternion ResolveNavigationRotation(GameObject placedSpecialObject)
+        {
+            return placedSpecialObject != null
+                ? placedSpecialObject.transform.rotation
+                : Quaternion.identity;
+        }
+
+        Bounds ResolveModuleBounds(Vector3 worldCenter)
+        {
+            return new Bounds(
+                worldCenter,
+                new Vector3(
+                    Mathf.Max(0.01f, m_CellSize),
+                    Mathf.Max(0.5f, ResolveWallHeight(isBoundaryWall: false)),
+                    Mathf.Max(0.01f, m_CellSize)));
+        }
+
+        static Bounds ResolveWalkableBounds(
+            MazeModuleNavigationAuthoring authoring,
+            Vector3 worldPosition,
+            Quaternion worldRotation,
+            Vector3 worldScale,
+            Bounds fallbackBounds)
+        {
+            if (authoring == null)
+                return fallbackBounds;
+
+            Bounds localBounds = authoring.GetResolvedLocalWalkableBounds(fallbackBounds.size.x);
+            return TransformLocalBounds(localBounds, worldPosition, worldRotation, worldScale);
+        }
+
+        static Bounds TransformLocalBounds(Bounds localBounds, Vector3 worldPosition, Quaternion worldRotation, Vector3 worldScale)
+        {
+            Vector3 scaledCenter = Vector3.Scale(localBounds.center, worldScale);
+            Vector3 worldCenter = worldPosition + worldRotation * scaledCenter;
+
+            Vector3 extents = localBounds.extents;
+            Vector3 axisX = worldRotation * Vector3.Scale(new Vector3(extents.x, 0f, 0f), worldScale);
+            Vector3 axisY = worldRotation * Vector3.Scale(new Vector3(0f, extents.y, 0f), worldScale);
+            Vector3 axisZ = worldRotation * Vector3.Scale(new Vector3(0f, 0f, extents.z), worldScale);
+            Vector3 worldExtents = new(
+                Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
+                Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
+                Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z));
+
+            return new Bounds(worldCenter, worldExtents * 2f);
+        }
+
+        static MazeNavigationAreaTag ResolveFallbackAreaTag(MazeCellData cell)
+        {
+            if (cell == null)
+                return MazeNavigationAreaTag.Default;
+
+            return cell.Role switch
+            {
+                MazeCellRole.Trap => MazeNavigationAreaTag.UnsafeEdge,
+                _ => MazeNavigationAreaTag.Default,
+            };
+        }
+
         void AttachPulseRevealVisual(GameObject target, Color backgroundColor, Color pulseColor, float emissionStrength)
         {
             if (target == null)
@@ -394,13 +553,343 @@ namespace CIS5680VRGame.Generation
             pulseVisual.SetVisual(backgroundColor, pulseColor, emissionStrength);
         }
 
+        void PlacePrototypeEnemies(MazeLayout layout, MazeRunBootstrap bootstrap)
+        {
+            if (layout == null || bootstrap == null || bootstrap.EnemiesRoot == null)
+                return;
+
+            int requestedEnemyCount = Mathf.Max(0, bootstrap.PrototypeEnemyCount);
+            if (requestedEnemyCount <= 0 || m_RobotScoutEnemyPrefab == null)
+                return;
+
+            List<MazeCellData> spawnCandidates = BuildPrototypeEnemySpawnCandidates(layout, bootstrap);
+            int spawnedCount = 0;
+            for (int i = 0; i < spawnCandidates.Count && spawnedCount < requestedEnemyCount; i++)
+            {
+                SpawnPrototypeEnemy(bootstrap, layout, spawnCandidates[i], spawnedCount);
+                spawnedCount++;
+            }
+        }
+
+        List<MazeCellData> BuildPrototypeEnemySpawnCandidates(MazeLayout layout, MazeRunBootstrap bootstrap)
+        {
+            var orderedCandidates = new List<MazeCellData>();
+            if (layout == null || bootstrap == null)
+                return orderedCandidates;
+
+            MazeCellData startCell = FindCellByRole(layout, MazeCellRole.Start);
+            MazeCellData goalCell = FindCellByRole(layout, MazeCellRole.Goal);
+            var addedPositions = new HashSet<Vector2Int>();
+            var rng = new System.Random(unchecked(layout.Seed * 397) ^ 0x4D455A45);
+
+            AppendEnemySpawnCandidates(
+                orderedCandidates,
+                addedPositions,
+                layout,
+                bootstrap,
+                startCell,
+                goalCell,
+                rng,
+                cell => cell.IsMainPath
+                    && cell.PathZone == MazePathZone.Late
+                    && GetConnectionCount(cell.Connections) >= 2);
+
+            AppendEnemySpawnCandidates(
+                orderedCandidates,
+                addedPositions,
+                layout,
+                bootstrap,
+                startCell,
+                goalCell,
+                rng,
+                cell => cell.IsMainPath
+                    && cell.PathZone == MazePathZone.Mid
+                    && GetConnectionCount(cell.Connections) >= 2);
+
+            AppendEnemySpawnCandidates(
+                orderedCandidates,
+                addedPositions,
+                layout,
+                bootstrap,
+                startCell,
+                goalCell,
+                rng,
+                cell => !cell.IsMainPath
+                    && ResolveBranchZone(cell, bootstrap, layout.MainPath.Count) == MazePathZone.Late
+                    && GetConnectionCount(cell.Connections) >= 2);
+
+            AppendEnemySpawnCandidates(
+                orderedCandidates,
+                addedPositions,
+                layout,
+                bootstrap,
+                startCell,
+                goalCell,
+                rng,
+                cell => !cell.IsMainPath
+                    && ResolveBranchZone(cell, bootstrap, layout.MainPath.Count) == MazePathZone.Mid
+                    && GetConnectionCount(cell.Connections) >= 2);
+
+            AppendEnemySpawnCandidates(
+                orderedCandidates,
+                addedPositions,
+                layout,
+                bootstrap,
+                startCell,
+                goalCell,
+                rng,
+                cell => ResolveBranchZone(cell, bootstrap, layout.MainPath.Count) != MazePathZone.Start
+                    && GetConnectionCount(cell.Connections) >= 2);
+
+            AppendEnemySpawnCandidates(
+                orderedCandidates,
+                addedPositions,
+                layout,
+                bootstrap,
+                startCell,
+                goalCell,
+                rng,
+                cell => ResolveBranchZone(cell, bootstrap, layout.MainPath.Count) != MazePathZone.Start
+                    && GetConnectionCount(cell.Connections) >= 1);
+
+            return orderedCandidates;
+        }
+
+        void AppendEnemySpawnCandidates(
+            List<MazeCellData> orderedCandidates,
+            HashSet<Vector2Int> addedPositions,
+            MazeLayout layout,
+            MazeRunBootstrap bootstrap,
+            MazeCellData startCell,
+            MazeCellData goalCell,
+            System.Random rng,
+            System.Predicate<MazeCellData> stageFilter)
+        {
+            if (orderedCandidates == null || addedPositions == null || layout == null || bootstrap == null || stageFilter == null)
+                return;
+
+            var stageCandidates = new List<MazeCellData>();
+            for (int i = 0; i < layout.Cells.Count; i++)
+            {
+                MazeCellData cell = layout.Cells[i];
+                if (!IsEligibleEnemySpawnCell(cell, bootstrap, startCell, goalCell))
+                    continue;
+
+                if (!stageFilter(cell))
+                    continue;
+
+                stageCandidates.Add(cell);
+            }
+
+            Shuffle(stageCandidates, rng);
+            for (int i = 0; i < stageCandidates.Count; i++)
+            {
+                MazeCellData cell = stageCandidates[i];
+                if (!addedPositions.Add(cell.GridPosition))
+                    continue;
+
+                orderedCandidates.Add(cell);
+            }
+        }
+
+        bool IsEligibleEnemySpawnCell(MazeCellData cell, MazeRunBootstrap bootstrap, MazeCellData startCell, MazeCellData goalCell)
+        {
+            if (cell == null || bootstrap == null)
+                return false;
+
+            if (cell.Role != MazeCellRole.Neutral)
+                return false;
+
+            if (cell.IsMainPath && cell.PathZone == MazePathZone.Start)
+                return false;
+
+            if (startCell != null && GetGridDistance(cell.GridPosition, startCell.GridPosition) <= bootstrap.StartSafeDistance)
+                return false;
+
+            if (goalCell != null && GetGridDistance(cell.GridPosition, goalCell.GridPosition) <= bootstrap.GoalSafeDistance)
+                return false;
+
+            return true;
+        }
+
+        void SpawnPrototypeEnemy(MazeRunBootstrap bootstrap, MazeLayout layout, MazeCellData spawnCell, int enemyIndex)
+        {
+            if (bootstrap == null || layout == null || spawnCell == null || bootstrap.EnemiesRoot == null || m_RobotScoutEnemyPrefab == null)
+                return;
+
+            GameObject enemyInstance = Instantiate(m_RobotScoutEnemyPrefab, bootstrap.EnemiesRoot);
+            enemyInstance.name = enemyIndex == 0
+                ? "GeneratedRobotScoutEnemy"
+                : $"GeneratedRobotScoutEnemy_{enemyIndex + 1}";
+
+            Vector3 spawnPosition = ResolveCellWorldPosition(spawnCell.GridPosition) + m_EnemyLocalOffset;
+            Quaternion spawnRotation = ResolveEnemySpawnRotation(layout, spawnCell);
+            enemyInstance.transform.SetPositionAndRotation(spawnPosition, spawnRotation);
+            enemyInstance.transform.localScale = m_RobotScoutEnemyPrefab.transform.localScale;
+            enemyInstance.SetActive(true);
+
+            EnemyPatrolController patrolController = enemyInstance.GetComponent<EnemyPatrolController>();
+            if (patrolController != null)
+            {
+                patrolController.SetRoamCenter(ResolveCellWorldPosition(spawnCell.GridPosition));
+                patrolController.SetPatrolRadius(Mathf.Max(m_CellSize * 2.5f, m_EnemyPatrolRadius));
+            }
+        }
+
+        Quaternion ResolveEnemySpawnRotation(MazeLayout layout, MazeCellData spawnCell)
+        {
+            if (layout == null || spawnCell == null)
+                return m_RobotScoutEnemyPrefab != null ? m_RobotScoutEnemyPrefab.transform.rotation : Quaternion.identity;
+
+            Vector2Int preferredDirection = Vector2Int.zero;
+            int preferredDistance = int.MinValue;
+
+            TrySelectFacingDirection(layout, spawnCell, MazeCellConnection.North, Vector2Int.up, ref preferredDirection, ref preferredDistance);
+            TrySelectFacingDirection(layout, spawnCell, MazeCellConnection.East, Vector2Int.right, ref preferredDirection, ref preferredDistance);
+            TrySelectFacingDirection(layout, spawnCell, MazeCellConnection.South, Vector2Int.down, ref preferredDirection, ref preferredDistance);
+            TrySelectFacingDirection(layout, spawnCell, MazeCellConnection.West, Vector2Int.left, ref preferredDirection, ref preferredDistance);
+
+            if (preferredDirection == Vector2Int.zero)
+                return m_RobotScoutEnemyPrefab != null ? m_RobotScoutEnemyPrefab.transform.rotation : Quaternion.identity;
+
+            Vector3 forward = new Vector3(preferredDirection.x, 0f, preferredDirection.y);
+            return Quaternion.LookRotation(forward, Vector3.up);
+        }
+
+        void TrySelectFacingDirection(
+            MazeLayout layout,
+            MazeCellData spawnCell,
+            MazeCellConnection requiredConnection,
+            Vector2Int direction,
+            ref Vector2Int preferredDirection,
+            ref int preferredDistance)
+        {
+            if (layout == null || spawnCell == null || !spawnCell.Connections.HasFlag(requiredConnection))
+                return;
+
+            if (!layout.TryGetCell(spawnCell.GridPosition + direction, out MazeCellData neighbor) || neighbor == null)
+                return;
+
+            if (neighbor.DistanceFromStart < preferredDistance)
+                return;
+
+            preferredDistance = neighbor.DistanceFromStart;
+            preferredDirection = direction;
+        }
+
         Vector3 ResolveCellWorldPosition(Vector2Int gridPosition)
         {
-            Vector3 origin = m_AlignStartToAnchor && m_StartAnchor != null
+            return GetCellWorldPosition(gridPosition);
+        }
+
+        public Vector3 GetCellWorldPosition(Vector2Int gridPosition)
+        {
+            Vector3 origin = ResolvedPlacementOrigin;
+            return origin + new Vector3(gridPosition.x * m_CellSize, 0f, gridPosition.y * m_CellSize);
+        }
+
+        public Vector2Int WorldToGridPosition(Vector3 worldPosition)
+        {
+            Vector3 origin = ResolvedPlacementOrigin;
+            float normalizedX = (worldPosition.x - origin.x) / Mathf.Max(0.01f, m_CellSize);
+            float normalizedZ = (worldPosition.z - origin.z) / Mathf.Max(0.01f, m_CellSize);
+            return new Vector2Int(
+                Mathf.RoundToInt(normalizedX),
+                Mathf.RoundToInt(normalizedZ));
+        }
+
+        void CachePlacementOrigin()
+        {
+            m_LastResolvedOrigin = ResolvePlacementOrigin();
+            m_HasResolvedOrigin = true;
+        }
+
+        Vector3 ResolvePlacementOrigin()
+        {
+            return m_AlignStartToAnchor && m_StartAnchor != null
                 ? m_StartAnchor.position
                 : m_ManualOrigin;
+        }
 
-            return origin + new Vector3(gridPosition.x * m_CellSize, 0f, gridPosition.y * m_CellSize);
+        static MazeCellData FindCellByRole(MazeLayout layout, MazeCellRole role)
+        {
+            if (layout == null)
+                return null;
+
+            for (int i = 0; i < layout.Cells.Count; i++)
+            {
+                MazeCellData cell = layout.Cells[i];
+                if (cell.Role == role)
+                    return cell;
+            }
+
+            return null;
+        }
+
+        static MazePathZone ResolveBranchZone(MazeCellData cell, MazeRunBootstrap bootstrap, int mainPathCount)
+        {
+            if (cell == null || bootstrap == null)
+                return MazePathZone.None;
+
+            if (cell.IsMainPath)
+                return cell.PathZone;
+
+            if (mainPathCount <= 2)
+                return MazePathZone.None;
+
+            int interiorCount = Mathf.Max(0, mainPathCount - 2);
+            if (interiorCount == 0)
+                return MazePathZone.None;
+
+            int startInteriorCount = Mathf.Clamp(Mathf.FloorToInt(interiorCount * bootstrap.StartZoneRatio), 0, interiorCount);
+            int remainingAfterStart = Mathf.Max(0, interiorCount - startInteriorCount);
+            int midInteriorCount = Mathf.Clamp(Mathf.FloorToInt(interiorCount * bootstrap.MidZoneRatio), 0, remainingAfterStart);
+            int index = Mathf.Clamp(cell.DistanceFromStart, 0, mainPathCount - 1);
+
+            if (index <= 0)
+                return MazePathZone.Start;
+
+            if (index >= mainPathCount - 1)
+                return MazePathZone.Late;
+
+            if (index <= startInteriorCount)
+                return MazePathZone.Start;
+
+            if (index <= startInteriorCount + midInteriorCount)
+                return MazePathZone.Mid;
+
+            return MazePathZone.Late;
+        }
+
+        static int GetGridDistance(Vector2Int a, Vector2Int b)
+        {
+            return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+        }
+
+        static int GetConnectionCount(MazeCellConnection connections)
+        {
+            int count = 0;
+            if (connections.HasFlag(MazeCellConnection.North))
+                count++;
+            if (connections.HasFlag(MazeCellConnection.East))
+                count++;
+            if (connections.HasFlag(MazeCellConnection.South))
+                count++;
+            if (connections.HasFlag(MazeCellConnection.West))
+                count++;
+            return count;
+        }
+
+        static void Shuffle<T>(IList<T> items, System.Random rng)
+        {
+            if (items == null || rng == null)
+                return;
+
+            for (int i = items.Count - 1; i > 0; i--)
+            {
+                int swapIndex = rng.Next(i + 1);
+                (items[i], items[swapIndex]) = (items[swapIndex], items[i]);
+            }
         }
 
         float ResolveWallHeight(bool isBoundaryWall)
@@ -505,6 +994,8 @@ namespace CIS5680VRGame.Generation
 
         void AutoAssignDefaultAssets()
         {
+            EnsureDefaultNavigationAuthoringSource();
+
 #if UNITY_EDITOR
             if (m_FloorRevealMaterial == null)
                 m_FloorRevealMaterial = AssetDatabase.LoadAssetAtPath<Material>(DefaultFloorMaterialPath);
@@ -529,7 +1020,20 @@ namespace CIS5680VRGame.Generation
 
             if (m_HealthRefillTemplate == null)
                 m_HealthRefillTemplate = AssetDatabase.LoadAssetAtPath<HealthRefillStation>(DefaultHealthRefillPrefabPath);
+
+            if (m_RobotScoutEnemyPrefab == null)
+                m_RobotScoutEnemyPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(DefaultRobotScoutEnemyPrefabPath);
 #endif
+        }
+
+        void EnsureDefaultNavigationAuthoringSource()
+        {
+            if (m_DefaultNavigationAuthoring != null)
+                return;
+
+            m_DefaultNavigationAuthoring = GetComponent<MazeModuleNavigationAuthoring>();
+            if (m_DefaultNavigationAuthoring == null)
+                m_DefaultNavigationAuthoring = gameObject.AddComponent<MazeModuleNavigationAuthoring>();
         }
 
         int ResolveGroundLayer()

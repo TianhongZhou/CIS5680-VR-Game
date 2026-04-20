@@ -43,6 +43,13 @@ namespace CIS5680VRGame.Progression
         NextRunPulseRadiusBonusPercent = 33,
         NextRunRevealHoldDurationBonusPercent = 34,
         NextRunSonarAndStickyEnergyCostPenalty = 35,
+        ThreatSenseRangeMeters = 36,
+        EnemyDetectionRangeReductionHalfMeters = 37,
+        EnemyFieldOfViewReductionDegrees = 38,
+        NextRunEnemyDetectionDisableDurationSeconds = 39,
+        NextRunEnemyDetectionRangeReductionHalfMeters = 40,
+        NextRunEnemyFieldOfViewReductionDegrees = 41,
+        NextRunEnemyDamageBonusPercent = 42,
     }
 
     public sealed class ShopUpgradeDefinition
@@ -85,10 +92,14 @@ namespace CIS5680VRGame.Progression
         const string LocatorGroupId = "group_locator_recharge";
         const string RefillBoostGroupId = "group_refill_boost";
         const string TreasureSenseGroupId = "group_treasure_sense";
+        const string ThreatSenseGroupId = "group_threat_sense";
+        const string LowSignatureGroupId = "group_low_signature";
         const string LocatorSupportSenseGroupId = "group_locator_support_sense";
         const string LifeInsuranceGroupId = "group_temp_life_insurance";
         const string SurveyBurstGroupId = "group_temp_survey_burst";
         const string GoalRevealGroupId = "group_temp_goal_reveal";
+        const string ColdStartGroupId = "group_temp_cold_start";
+        const string FragileStealthRigGroupId = "group_temp_fragile_stealth_rig";
         const string GreedyCoreGroupId = "group_temp_greedy_core";
         const string GlassBatteryGroupId = "group_temp_glass_battery";
         const string OverclockedSonarGroupId = "group_temp_overclocked_sonar";
@@ -591,6 +602,34 @@ namespace CIS5680VRGame.Progression
             },
             new()
             {
+                Id = "upgrade_threat_sense_alpha",
+                DisplayName = "Threat Sense Tier B",
+                Description = "Locator can now detect enemies, and enemy detection range increases by 4m.",
+                Cost = 2,
+                EffectType = ShopUpgradeEffectType.ThreatSenseRangeMeters,
+                EffectValue = 4,
+                PurchaseGroupId = ThreatSenseGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 3,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
+                Id = "upgrade_low_signature_alpha",
+                DisplayName = "Low Signature Tier B",
+                Description = "Enemies detect you from 1.5m less distance and lose 15° of vision.",
+                Cost = 1,
+                EffectType = ShopUpgradeEffectType.EnemyDetectionRangeReductionHalfMeters,
+                EffectValue = 3,
+                SecondaryEffectType = ShopUpgradeEffectType.EnemyFieldOfViewReductionDegrees,
+                SecondaryEffectValue = 15,
+                PurchaseGroupId = LowSignatureGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 3,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
                 Id = "upgrade_locator_support_sense_alpha",
                 DisplayName = "Recovery Sense Tier B",
                 Description = "Locator can now detect active energy and health refill stations, and locator range increases by 4m.",
@@ -772,6 +811,34 @@ namespace CIS5680VRGame.Progression
             },
             new()
             {
+                Id = "upgrade_threat_sense_beta",
+                DisplayName = "Threat Sense Tier A",
+                Description = "Locator can now detect enemies, and enemy detection range increases by 6m.",
+                Cost = 4,
+                EffectType = ShopUpgradeEffectType.ThreatSenseRangeMeters,
+                EffectValue = 6,
+                PurchaseGroupId = ThreatSenseGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 3,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
+                Id = "upgrade_low_signature_beta",
+                DisplayName = "Low Signature Tier A",
+                Description = "Enemies detect you from 2m less distance and lose 20° of vision.",
+                Cost = 3,
+                EffectType = ShopUpgradeEffectType.EnemyDetectionRangeReductionHalfMeters,
+                EffectValue = 4,
+                SecondaryEffectType = ShopUpgradeEffectType.EnemyFieldOfViewReductionDegrees,
+                SecondaryEffectValue = 20,
+                PurchaseGroupId = LowSignatureGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 3,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
                 Id = "upgrade_treasure_sense_gamma",
                 DisplayName = "Treasure Sense Tier S",
                 Description = "Locator can now detect coins, and coin detection range increases by 10m.",
@@ -779,6 +846,34 @@ namespace CIS5680VRGame.Progression
                 EffectType = ShopUpgradeEffectType.TreasureSenseRangeMeters,
                 EffectValue = 10,
                 PurchaseGroupId = TreasureSenseGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 3,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
+                Id = "upgrade_threat_sense_gamma",
+                DisplayName = "Threat Sense Tier S",
+                Description = "Locator can now detect enemies, and enemy detection range increases by 10m.",
+                Cost = 6,
+                EffectType = ShopUpgradeEffectType.ThreatSenseRangeMeters,
+                EffectValue = 10,
+                PurchaseGroupId = ThreatSenseGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 3,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
+                Id = "upgrade_low_signature_gamma",
+                DisplayName = "Low Signature Tier S",
+                Description = "Enemies detect you from 2.5m less distance and lose 25° of vision.",
+                Cost = 5,
+                EffectType = ShopUpgradeEffectType.EnemyDetectionRangeReductionHalfMeters,
+                EffectValue = 5,
+                SecondaryEffectType = ShopUpgradeEffectType.EnemyFieldOfViewReductionDegrees,
+                SecondaryEffectValue = 25,
+                PurchaseGroupId = LowSignatureGroupId,
                 MaxPurchaseCount = 1,
                 MaxGroupPurchaseCount = 3,
                 IsMechanicChanging = true,
@@ -825,6 +920,41 @@ namespace CIS5680VRGame.Progression
                 MaxGroupPurchaseCount = 1,
                 PersistsPurchase = false,
                 IsSingleRunTemporary = true,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
+                Id = "upgrade_cold_start",
+                DisplayName = "Cold Start",
+                Description = "Next run only: for the first 30 seconds, enemies cannot actively detect you. Contact damage still applies if you move too close.",
+                Cost = 3,
+                EffectType = ShopUpgradeEffectType.NextRunEnemyDetectionDisableDurationSeconds,
+                EffectValue = 30,
+                PurchaseGroupId = ColdStartGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 1,
+                PersistsPurchase = false,
+                IsSingleRunTemporary = true,
+                IsMechanicChanging = true,
+            },
+            new()
+            {
+                Id = "upgrade_fragile_stealth_rig",
+                DisplayName = "Fragile Stealth Rig",
+                Description = "Next run only: enemies detect you from 3m less distance and lose 40 degrees of vision. Drawback: enemy damage +50%.",
+                Cost = 3,
+                EffectType = ShopUpgradeEffectType.NextRunEnemyDetectionRangeReductionHalfMeters,
+                EffectValue = 6,
+                SecondaryEffectType = ShopUpgradeEffectType.NextRunEnemyFieldOfViewReductionDegrees,
+                SecondaryEffectValue = 40,
+                TertiaryEffectType = ShopUpgradeEffectType.NextRunEnemyDamageBonusPercent,
+                TertiaryEffectValue = 50,
+                PurchaseGroupId = FragileStealthRigGroupId,
+                MaxPurchaseCount = 1,
+                MaxGroupPurchaseCount = 1,
+                PersistsPurchase = false,
+                IsSingleRunTemporary = true,
+                IsRiskySingleRunTemporary = true,
                 IsMechanicChanging = true,
             },
             new()

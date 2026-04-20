@@ -126,6 +126,9 @@ namespace CIS5680VRGame.Progression
             int healthRegenIntervalReductionPercent = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.HealthRegenIntervalReductionPercent);
             int healthRegenDelayReductionSeconds = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.HealthRegenDelayReductionSeconds);
             int treasureSenseRangeMeters = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.TreasureSenseRangeMeters);
+            int threatSenseRangeMeters = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.ThreatSenseRangeMeters);
+            int enemyDetectionRangeReductionHalfMeters = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.EnemyDetectionRangeReductionHalfMeters);
+            int enemyFieldOfViewReductionDegrees = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.EnemyFieldOfViewReductionDegrees);
             int locatorSupportSenseRangeMeters = ShopUpgradeCatalog.GetTotalEffectValue(profile, ShopUpgradeEffectType.LocatorSupportSenseRangeMeters);
             int lifeInsuranceCharges = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
                 m_ActiveSingleRunUpgradeIds,
@@ -136,6 +139,18 @@ namespace CIS5680VRGame.Progression
             int goalRevealCharges = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
                 m_ActiveSingleRunUpgradeIds,
                 ShopUpgradeEffectType.NextRunGoalRevealCharge);
+            int coldStartDetectionDisableDurationSeconds = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
+                m_ActiveSingleRunUpgradeIds,
+                ShopUpgradeEffectType.NextRunEnemyDetectionDisableDurationSeconds);
+            int singleRunEnemyDetectionRangeReductionHalfMeters = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
+                m_ActiveSingleRunUpgradeIds,
+                ShopUpgradeEffectType.NextRunEnemyDetectionRangeReductionHalfMeters);
+            int singleRunEnemyFieldOfViewReductionDegrees = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
+                m_ActiveSingleRunUpgradeIds,
+                ShopUpgradeEffectType.NextRunEnemyFieldOfViewReductionDegrees);
+            int singleRunEnemyDamageBonusPercent = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
+                m_ActiveSingleRunUpgradeIds,
+                ShopUpgradeEffectType.NextRunEnemyDamageBonusPercent);
             int glassBatteryEnergyBonus = ShopUpgradeCatalog.GetTotalEffectValueForUpgradeIds(
                 m_ActiveSingleRunUpgradeIds,
                 ShopUpgradeEffectType.NextRunEnergyCapacityAndStartingEnergyBonus);
@@ -206,9 +221,17 @@ namespace CIS5680VRGame.Progression
                 locatorGuidance.ApplyPersistentCooldownReductionPercent(locatorCooldownReductionPercent);
                 locatorGuidance.ApplyPersistentLocatorSupportSenseRangeMeters(locatorSupportSenseRangeMeters);
                 locatorGuidance.ApplyPersistentCoinSenseRangeMeters(treasureSenseRangeMeters);
+                locatorGuidance.ApplyPersistentEnemySenseRangeMeters(threatSenseRangeMeters);
                 if (goalRevealCharges > 0 && string.Equals(SceneManager.GetActiveScene().name, RandomMazeSceneName, StringComparison.Ordinal))
                     locatorGuidance.RevealGoalMarkersForDuration(GoalRevealDurationSeconds);
             }
+
+            EnemyPatrolController.SetGlobalDetectionRangeReductionMeters(
+                (enemyDetectionRangeReductionHalfMeters + singleRunEnemyDetectionRangeReductionHalfMeters) * 0.5f);
+            EnemyPatrolController.SetGlobalFieldOfViewReductionDegrees(
+                enemyFieldOfViewReductionDegrees + singleRunEnemyFieldOfViewReductionDegrees);
+            EnemyPatrolController.SetGlobalDetectionSuppressedDuration(coldStartDetectionDisableDurationSeconds);
+            EnemyContactDamage.SetGlobalDamageBonusPercent(singleRunEnemyDamageBonusPercent);
 
             BallHolsterSlot[] holsterSlots = FindObjectsOfType<BallHolsterSlot>(true);
             for (int i = 0; i < holsterSlots.Length; i++)

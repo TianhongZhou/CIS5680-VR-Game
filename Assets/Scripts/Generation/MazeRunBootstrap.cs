@@ -13,6 +13,7 @@ namespace CIS5680VRGame.Generation
         const string GeneratedHazardsName = "GeneratedHazards";
         const string GeneratedRefillsName = "GeneratedRefills";
         const string GeneratedRewardsName = "GeneratedRewards";
+        const string GeneratedEnemiesName = "GeneratedEnemies";
         const string GeneratedGoalName = "GeneratedGoal";
         const int MinSupportedMazeSize = 5;
         const int MaxSupportedMazeSize = 200;
@@ -22,10 +23,14 @@ namespace CIS5680VRGame.Generation
         [Header("Generation Roots")]
         [SerializeField] MazeGenerator m_Generator;
         [SerializeField] MazeModulePlacer m_ModulePlacer;
+        [SerializeField] MazeGridNavigator m_GridNavigator;
+        [SerializeField] MazeNavigationGraph m_NavigationGraph;
+        [SerializeField] MazeLocalNavigationProvider m_LocalNavigationProvider;
         [SerializeField] Transform m_ModulesRoot;
         [SerializeField] Transform m_HazardsRoot;
         [SerializeField] Transform m_RefillsRoot;
         [SerializeField] Transform m_RewardsRoot;
+        [SerializeField] Transform m_EnemiesRoot;
         [SerializeField] Transform m_GoalRoot;
 
         [Header("Startup")]
@@ -44,6 +49,9 @@ namespace CIS5680VRGame.Generation
         [SerializeField] int m_HealthRefillCount = 1;
         [SerializeField] int m_TrapCount = 1;
         [SerializeField] int m_RewardCount = 2;
+
+        [Header("Enemy Prototype")]
+        [SerializeField, Min(0)] int m_PrototypeEnemyCount = 1;
 
         [Header("Placement Rules")]
         [SerializeField] int m_MinSameTypeCellDistance = 2;
@@ -89,10 +97,15 @@ namespace CIS5680VRGame.Generation
         public string LastRuntimeProfileSummary => string.IsNullOrWhiteSpace(m_LastRuntimeProfileSummary)
             ? "No runtime random maze profile override applied."
             : m_LastRuntimeProfileSummary;
+        public MazeModulePlacer ModulePlacer => m_ModulePlacer;
+        public MazeGridNavigator GridNavigator => m_GridNavigator;
+        public MazeNavigationGraph NavigationGraph => m_NavigationGraph;
+        public MazeLocalNavigationProvider LocalNavigationProvider => m_LocalNavigationProvider;
         public Transform ModulesRoot => m_ModulesRoot;
         public Transform HazardsRoot => m_HazardsRoot;
         public Transform RefillsRoot => m_RefillsRoot;
         public Transform RewardsRoot => m_RewardsRoot;
+        public Transform EnemiesRoot => m_EnemiesRoot;
         public Transform GoalRoot => m_GoalRoot;
         public bool UseFixedSeed => m_UseFixedSeed;
         public bool UseRuntimeProfileOverride => m_UseRuntimeProfileOverride;
@@ -102,6 +115,7 @@ namespace CIS5680VRGame.Generation
         public int HealthRefillCount => m_HealthRefillCount;
         public int TrapCount => m_TrapCount;
         public int RewardCount => m_RewardCount;
+        public int PrototypeEnemyCount => m_PrototypeEnemyCount;
         public int MinSameTypeCellDistance => m_MinSameTypeCellDistance;
         public int MinCrossTypeCellDistance => m_MinCrossTypeCellDistance;
         public int StartSafeDistance => m_StartSafeDistance;
@@ -131,6 +145,9 @@ namespace CIS5680VRGame.Generation
             EnsureGeneratedHierarchy();
             ResolveGenerator();
             ResolveModulePlacer();
+            EnsureGridNavigator();
+            EnsureNavigationGraph();
+            EnsureLocalNavigationProvider();
         }
 
         void Awake()
@@ -138,6 +155,9 @@ namespace CIS5680VRGame.Generation
             EnsureGeneratedHierarchy();
             ResolveGenerator();
             ResolveModulePlacer();
+            EnsureGridNavigator();
+            EnsureNavigationGraph();
+            EnsureLocalNavigationProvider();
 
             if (m_UseRuntimeProfileOverride)
                 TryApplyRuntimeProfileOverride();
@@ -160,6 +180,7 @@ namespace CIS5680VRGame.Generation
             m_HazardsRoot = EnsureChild(transform, GeneratedHazardsName);
             m_RefillsRoot = EnsureChild(transform, GeneratedRefillsName);
             m_RewardsRoot = EnsureChild(transform, GeneratedRewardsName);
+            m_EnemiesRoot = EnsureChild(transform, GeneratedEnemiesName);
             m_GoalRoot = EnsureChild(transform, GeneratedGoalName);
         }
 
@@ -171,7 +192,10 @@ namespace CIS5680VRGame.Generation
             ClearChildren(m_HazardsRoot);
             ClearChildren(m_RefillsRoot);
             ClearChildren(m_RewardsRoot);
+            ClearChildren(m_EnemiesRoot);
             ClearChildren(m_GoalRoot);
+            if (m_NavigationGraph != null)
+                m_NavigationGraph.Clear();
         }
 
         [ContextMenu("Generate Logic Layout")]
@@ -183,6 +207,10 @@ namespace CIS5680VRGame.Generation
         public void GenerateLogicLayout(MazeMainPathBuildMode buildMode)
         {
             ResolveGenerator();
+            ResolveModulePlacer();
+            EnsureGridNavigator();
+            EnsureNavigationGraph();
+            EnsureLocalNavigationProvider();
 
             if (!TryGetGenerationValidationMessage(out string validationMessage))
             {
@@ -208,12 +236,17 @@ namespace CIS5680VRGame.Generation
             CurrentLayout = m_Generator.GenerateLayout(CurrentSeed, buildMode);
             if (CurrentLayout == null)
             {
+                if (m_NavigationGraph != null)
+                    m_NavigationGraph.Clear();
                 Debug.LogError($"MazeRunBootstrap failed to generate a maze layout using mode {buildMode}.", this);
                 return;
             }
 
             if (m_ModulePlacer != null)
                 m_ModulePlacer.BuildModules(CurrentLayout, this);
+
+            if (m_NavigationGraph != null)
+                m_NavigationGraph.BuildFromLayout(CurrentLayout);
 
             if (m_BuildLogicDebugPreview)
                 BuildLogicDebugPreview(CurrentLayout);
@@ -260,6 +293,33 @@ namespace CIS5680VRGame.Generation
 
             if (m_LogBootstrap)
                 Debug.Log(m_LastRuntimeProfileSummary, this);
+        }
+
+        void EnsureGridNavigator()
+        {
+            if (m_GridNavigator == null)
+                m_GridNavigator = GetComponent<MazeGridNavigator>();
+
+            if (m_GridNavigator == null)
+                m_GridNavigator = gameObject.AddComponent<MazeGridNavigator>();
+        }
+
+        void EnsureNavigationGraph()
+        {
+            if (m_NavigationGraph == null)
+                m_NavigationGraph = GetComponent<MazeNavigationGraph>();
+
+            if (m_NavigationGraph == null)
+                m_NavigationGraph = gameObject.AddComponent<MazeNavigationGraph>();
+        }
+
+        void EnsureLocalNavigationProvider()
+        {
+            if (m_LocalNavigationProvider == null)
+                m_LocalNavigationProvider = GetComponent<MazeLocalNavigationProvider>();
+
+            if (m_LocalNavigationProvider == null)
+                m_LocalNavigationProvider = gameObject.AddComponent<MazeBoundsLocalNavigationProvider>();
         }
 
         void ApplyRuntimeProfile(RandomMazeRuntimeProfileData profile, int effectiveSeed)
@@ -363,6 +423,7 @@ namespace CIS5680VRGame.Generation
             ValidateNonNegative(errors, "Health Refill Count", m_HealthRefillCount);
             ValidateNonNegative(errors, "Trap Count", m_TrapCount);
             ValidateNonNegative(errors, "Reward Count", m_RewardCount);
+            ValidateNonNegative(errors, "Prototype Enemy Count", m_PrototypeEnemyCount);
             ValidateNonNegative(errors, "Min Same-Type Cell Distance", m_MinSameTypeCellDistance);
             ValidateNonNegative(errors, "Min Cross-Type Cell Distance", m_MinCrossTypeCellDistance);
             ValidateNonNegative(errors, "Start Safe Distance", m_StartSafeDistance);
