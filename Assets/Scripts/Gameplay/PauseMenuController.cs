@@ -244,16 +244,6 @@ namespace CIS5680VRGame.Gameplay
                 new Color(0.92f, 0.98f, 1f, 1f),
                 110f);
 
-            CreateLabel(
-                "Message",
-                panel.transform,
-                "Choose your next step.",
-                fontAsset,
-                30f,
-                FontStyles.Normal,
-                new Color(0.72f, 0.86f, 0.96f, 1f),
-                72f);
-
             GameObject buttonColumn = ModalMenuPauseUtility.CreateUIObject("Buttons", panel.transform);
             VerticalLayoutGroup buttonLayout = buttonColumn.AddComponent<VerticalLayoutGroup>();
             buttonLayout.spacing = 18f;

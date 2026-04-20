@@ -289,7 +289,7 @@ namespace CIS5680VRGame.UI
             promptFrameRect.anchorMax = new Vector2(0.5f, 0.5f);
             promptFrameRect.pivot = new Vector2(0.5f, 0.5f);
             promptFrameRect.anchoredPosition = Vector2.zero;
-            float promptFrameWidth = Mathf.Min(m_TutorialPromptSize.x, m_MenuSize.x - 132f);
+            float promptFrameWidth = Mathf.Min(m_TutorialPromptSize.x, m_MenuSize.x - 50f);
             float promptFrameHeight = Mathf.Min(m_TutorialPromptSize.y, contentAreaHeight - 8f);
             promptFrameRect.sizeDelta = new Vector2(promptFrameWidth, promptFrameHeight);
 
