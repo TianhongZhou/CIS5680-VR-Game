@@ -137,7 +137,7 @@ Rigidbody:
   m_IsKinematic: 0
   m_Interpolate: 1
   m_Constraints: 0
-  m_CollisionDetection: 0
+  m_CollisionDetection: 2
 --- !u!114 &5922422646180309903
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -236,7 +236,7 @@ MonoBehaviour:
   m_SmoothScaleAmount: 8
   m_TightenScale: 0.1
   m_ThrowOnDetach: 1
-  m_ThrowSmoothingDuration: 0.25
+  m_ThrowSmoothingDuration: 0.18
   m_ThrowSmoothingCurve:
     serializedVersion: 2
     m_Curve:
@@ -252,7 +252,7 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
-  m_ThrowVelocityScale: 1.5
+  m_ThrowVelocityScale: 1.05
   m_ThrowAngularVelocityScale: 1
   m_ForceGravityOnDetach: 1
   m_RetainTransformParent: 1
@@ -304,6 +304,12 @@ MonoBehaviour:
   m_AllowOnlyAfterThrow: 1
   m_DestroyOnImpact: 1
   m_DestroyDelay: 0
+  m_FadePulseBallsAfterImpact: 1
+  m_PostPulseLingerDuration: 0.2
+  m_PostPulseFadeDuration: 0.55
+  m_MaxReleaseSpeed: 5.75
+  m_MaxReleaseAngularSpeed: 24
+  m_IgnoreHolsterCollisionsOnThrow: 1
 --- !u!114 &-6870559679311042592
 MonoBehaviour:
   m_ObjectHideFlags: 0

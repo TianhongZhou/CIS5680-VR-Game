@@ -14,6 +14,8 @@ namespace CIS5680VRGame.Balls
             public const float BaseRefillAmount = 50f;
         }
 
+        const int k_UnlimitedChargeCount = 999999;
+
         static readonly int k_BaseColorId = Shader.PropertyToID("_BaseColor");
         static readonly int k_ColorId = Shader.PropertyToID("_Color");
         static readonly int k_RimColorId = Shader.PropertyToID("_RimColor");
@@ -22,6 +24,8 @@ namespace CIS5680VRGame.Balls
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] PlayerEnergy m_PlayerEnergy;
         [SerializeField] bool m_OverrideSharedDefaults;
+        [SerializeField] bool m_IgnoreProgressionModifiers;
+        [SerializeField] bool m_UnlimitedCharges;
         [SerializeField, Min(1)] int m_Charges = SharedDefaults.Charges;
         [SerializeField] float m_Cooldown = SharedDefaults.Cooldown;
         [SerializeField] float m_BaseRefillAmount = SharedDefaults.BaseRefillAmount;
@@ -43,12 +47,24 @@ namespace CIS5680VRGame.Balls
         int m_SingleRunChargePenalty;
         int m_SingleRunRefillMultiplierPercent = 100;
 
-        public int MaxCharges => Mathf.Max(1, m_Charges + Mathf.Max(0, m_PersistentChargeBonus) - Mathf.Max(0, m_SingleRunChargePenalty));
-        public int ChargesRemaining => Mathf.Max(0, m_ChargesRemaining);
-        public bool IsDepleted => ChargesRemaining <= 0;
+        public int MaxCharges
+        {
+            get
+            {
+                if (m_UnlimitedCharges)
+                    return k_UnlimitedChargeCount;
+
+                int chargeBonus = m_IgnoreProgressionModifiers ? 0 : Mathf.Max(0, m_PersistentChargeBonus);
+                int chargePenalty = m_IgnoreProgressionModifiers ? 0 : Mathf.Max(0, m_SingleRunChargePenalty);
+                return Mathf.Max(1, m_Charges + chargeBonus - chargePenalty);
+            }
+        }
+
+        public int ChargesRemaining => m_UnlimitedCharges ? MaxCharges : Mathf.Max(0, m_ChargesRemaining);
+        public bool IsDepleted => !m_UnlimitedCharges && ChargesRemaining <= 0;
         public bool IsReady => !IsDepleted && Time.time >= m_CooldownEndsAt;
         public bool IsLocatorAvailable => !IsDepleted;
-        public bool HasBeenVisited => IsDepleted;
+        public bool HasBeenVisited => !m_UnlimitedCharges && IsDepleted;
 
         public void SetPersistentRefillBonusPercent(int bonusPercent)
         {
@@ -161,7 +177,10 @@ namespace CIS5680VRGame.Balls
 
             if (refilledAny)
             {
-                m_ChargesRemaining = Mathf.Max(0, m_ChargesRemaining - 1);
+                m_ChargesRemaining = m_UnlimitedCharges
+                    ? MaxCharges
+                    : Mathf.Max(0, m_ChargesRemaining - 1);
+
                 if (!IsDepleted)
                     m_CooldownEndsAt = Time.time + GetEffectiveCooldown();
                 else
@@ -174,6 +193,9 @@ namespace CIS5680VRGame.Balls
 
         float GetEffectiveRefillAmount()
         {
+            if (m_IgnoreProgressionModifiers)
+                return Mathf.Max(1f, m_BaseRefillAmount);
+
             float persistentMultiplier = 1f + Mathf.Max(0, m_PersistentRefillBonusPercent) / 100f;
             float singleRunMultiplier = Mathf.Clamp(m_SingleRunRefillMultiplierPercent, 1, 1000) / 100f;
             float multiplier = persistentMultiplier * singleRunMultiplier;
@@ -182,6 +204,9 @@ namespace CIS5680VRGame.Balls
 
         float GetEffectiveCooldown()
         {
+            if (m_IgnoreProgressionModifiers)
+                return Mathf.Max(0.1f, m_Cooldown);
+
             float multiplier = 1f - (Mathf.Clamp(m_PersistentCooldownReductionPercent, 0, 90) / 100f);
             return Mathf.Max(0.1f, m_Cooldown * multiplier);
         }
@@ -242,6 +267,8 @@ namespace CIS5680VRGame.Balls
             if (m_OverrideSharedDefaults)
                 return;
 
+            m_IgnoreProgressionModifiers = false;
+            m_UnlimitedCharges = false;
             m_Charges = SharedDefaults.Charges;
             m_Cooldown = SharedDefaults.Cooldown;
             m_BaseRefillAmount = SharedDefaults.BaseRefillAmount;
@@ -249,6 +276,12 @@ namespace CIS5680VRGame.Balls
 
         void AdjustRemainingCharges(int previousMaxCharges, int newMaxCharges)
         {
+            if (m_UnlimitedCharges)
+            {
+                m_ChargesRemaining = MaxCharges;
+                return;
+            }
+
             if (m_ChargesRemaining <= 0)
                 return;
 

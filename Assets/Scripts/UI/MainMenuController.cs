@@ -14,8 +14,12 @@ namespace CIS5680VRGame.UI
     public class MainMenuController : MonoBehaviour
     {
         const string MainMenuMusicClipPath = "Audio/Music/Music_MainMenu";
+        const string RandomMazeSceneName = "random-maze";
+        static readonly Vector2 k_MinMainMenuSize = new(620f, 560f);
+        static readonly Vector2 k_MainMenuSafePadding = new(96f, 72f);
+        static readonly Vector2 k_MinTutorialPromptSize = new(520f, 300f);
 
-        [SerializeField] string m_GameplaySceneName = "Maze1";
+        [SerializeField] string m_GameplaySceneName = RandomMazeSceneName;
         [SerializeField] string m_TutorialSceneName = "TutorialLevel";
         [SerializeField] string m_ShopSceneName = "ShopScene";
         [SerializeField] XROrigin m_PlayerRig;
@@ -27,6 +31,7 @@ namespace CIS5680VRGame.UI
         [SerializeField] Vector2 m_TutorialCancelButtonSize = new(240f, 56f);
         [SerializeField] float m_TutorialChoiceButtonFontSize = 26f;
         [SerializeField] float m_TutorialCancelButtonFontSize = 24f;
+        [SerializeField] Vector3 m_MenuWorldOffset = new(0f, -0.44f, 2f);
         [SerializeField] Vector2 m_PanelAnchor = new(0.34f, 0.52f);
         [SerializeField] Vector2 m_PanelOffset = Vector2.zero;
         [SerializeField] float m_CanvasPlaneDistance = 1.05f;
@@ -119,12 +124,13 @@ namespace CIS5680VRGame.UI
             RectTransform panelRect;
             if (createdNewRoot)
             {
-                m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
+                m_MenuRoot = ModalMenuPauseUtility.CreateWorldSpaceMenuRoot(
                     "MainMenuCanvas",
                     menuCamera,
                     resolvedMenuSize,
                     new Color(0f, 0f, 0f, 0.18f),
-                    out panelRect);
+                    out panelRect,
+                    ResolveMenuWorldOffset());
             }
             else
             {
@@ -289,9 +295,7 @@ namespace CIS5680VRGame.UI
             promptFrameRect.anchorMax = new Vector2(0.5f, 0.5f);
             promptFrameRect.pivot = new Vector2(0.5f, 0.5f);
             promptFrameRect.anchoredPosition = Vector2.zero;
-            float promptFrameWidth = Mathf.Min(m_TutorialPromptSize.x, m_MenuSize.x - 50f);
-            float promptFrameHeight = Mathf.Min(m_TutorialPromptSize.y, contentAreaHeight - 8f);
-            promptFrameRect.sizeDelta = new Vector2(promptFrameWidth, promptFrameHeight);
+            promptFrameRect.sizeDelta = ResolveTutorialPromptSize(resolvedMenuSize, contentAreaHeight);
 
             Image promptFrameImage = promptFrame.AddComponent<Image>();
             promptFrameImage.color = new Color(0.02f, 0.03f, 0.05f, 0.96f);
@@ -420,9 +424,7 @@ namespace CIS5680VRGame.UI
             if (canvas == null)
                 return;
 
-            canvas.renderMode = RenderMode.ScreenSpaceCamera;
-            canvas.worldCamera = menuCamera;
-            canvas.planeDistance = Mathf.Max(menuCamera.nearClipPlane + 0.25f, m_CanvasPlaneDistance);
+            ModalMenuPauseUtility.ConfigureWorldSpaceMenuRoot(m_MenuRoot, menuCamera, ResolveMenuWorldOffset());
         }
 
         RectTransform ResolvePanelRect()
@@ -434,12 +436,25 @@ namespace CIS5680VRGame.UI
             return panelTransform as RectTransform;
         }
 
+        Vector3 ResolveMenuWorldOffset()
+        {
+            Vector3 offset = m_MenuWorldOffset;
+            if (offset.z <= 0f)
+                offset.z = Mathf.Max(m_CanvasPlaneDistance, ModalMenuPauseUtility.WorldMenuLocalOffset.z);
+            return offset;
+        }
+
         Vector2 ResolveMenuSize()
         {
             float contentAreaHeight = ResolveContentAreaHeight();
-            Vector2 resolvedMenuSize = m_MenuSize;
+            Vector2 resolvedMenuSize = new(
+                Mathf.Max(m_MenuSize.x, k_MinMainMenuSize.x),
+                Mathf.Max(m_MenuSize.y, k_MinMainMenuSize.y));
             resolvedMenuSize.y = Mathf.Max(resolvedMenuSize.y, 312f + contentAreaHeight);
-            return resolvedMenuSize;
+            return ModalMenuPauseUtility.ClampPanelSize(
+                resolvedMenuSize,
+                k_MainMenuSafePadding,
+                k_MinMainMenuSize);
         }
 
         float ResolveContentAreaHeight()
@@ -447,16 +462,28 @@ namespace CIS5680VRGame.UI
             return Mathf.Max(m_ButtonSize.y * 4f + 114f, m_MenuSize.y - 276f);
         }
 
+        Vector2 ResolveTutorialPromptSize(Vector2 resolvedMenuSize, float contentAreaHeight)
+        {
+            Vector2 preferredSize = new(
+                Mathf.Max(m_TutorialPromptSize.x, k_MinTutorialPromptSize.x),
+                Mathf.Max(m_TutorialPromptSize.y, k_MinTutorialPromptSize.y));
+            float maxWidth = Mathf.Max(k_MinTutorialPromptSize.x, resolvedMenuSize.x - 80f);
+            float maxHeight = Mathf.Max(k_MinTutorialPromptSize.y, contentAreaHeight - 24f);
+            return new Vector2(
+                Mathf.Min(preferredSize.x, maxWidth),
+                Mathf.Min(preferredSize.y, maxHeight));
+        }
+
         void ConfigurePanelTransform(RectTransform panelRect, Vector2 resolvedMenuSize)
         {
             if (panelRect == null)
                 return;
 
-            panelRect.anchorMin = m_PanelAnchor;
-            panelRect.anchorMax = m_PanelAnchor;
-            panelRect.pivot = new Vector2(0.5f, 0.5f);
-            panelRect.anchoredPosition = m_PanelOffset;
-            panelRect.sizeDelta = resolvedMenuSize;
+            ModalMenuPauseUtility.ConfigureCenteredSafePanel(
+                panelRect,
+                resolvedMenuSize,
+                k_MainMenuSafePadding,
+                k_MinMainMenuSize);
         }
 
         bool MenuRootNeedsRefresh()
@@ -573,12 +600,13 @@ namespace CIS5680VRGame.UI
             label.color = color;
             label.alignment = TextAlignmentOptions.Center;
             label.enableWordWrapping = allowWordWrap;
-            label.enableAutoSizing = autoSizeToWidth;
-            if (autoSizeToWidth)
+            label.enableAutoSizing = autoSizeToWidth || allowWordWrap;
+            if (label.enableAutoSizing)
             {
                 label.fontSizeMax = fontSize;
                 label.fontSizeMin = Mathf.Max(18f, fontSize * 0.55f);
-                label.enableWordWrapping = false;
+                if (autoSizeToWidth && !allowWordWrap)
+                    label.enableWordWrapping = false;
             }
 
             return label;
@@ -663,8 +691,9 @@ namespace CIS5680VRGame.UI
         {
             Time.timeScale = 1f;
             AudioListener.pause = false;
-            ProfileService.BeginNewGameOnSceneLoad(m_GameplaySceneName);
-            SceneTransitionService.LoadScene(m_GameplaySceneName, m_BackgroundMusicSource);
+            string gameplaySceneName = ResolveGameplaySceneName();
+            ProfileService.BeginNewGameOnSceneLoad(gameplaySceneName);
+            SceneTransitionService.LoadScene(gameplaySceneName, m_BackgroundMusicSource);
         }
 
         void LoadShop()
@@ -682,6 +711,12 @@ namespace CIS5680VRGame.UI
             Time.timeScale = 1f;
             AudioListener.pause = false;
             SceneTransitionService.LoadScene(continueSceneName, m_BackgroundMusicSource);
+        }
+
+        string ResolveGameplaySceneName()
+        {
+            string resolvedSceneName = ProfileService.ResolveFormalGameplaySceneName(m_GameplaySceneName);
+            return string.IsNullOrWhiteSpace(resolvedSceneName) ? RandomMazeSceneName : resolvedSceneName;
         }
 
         void QuitGame()

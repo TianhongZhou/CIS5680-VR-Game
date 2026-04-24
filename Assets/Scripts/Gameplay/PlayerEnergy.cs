@@ -54,6 +54,7 @@ namespace CIS5680VRGame.Gameplay
         float m_RegenTimer;
         float m_LastInsufficientSignalTime = -999f;
         bool m_IsRefillInProgress;
+        bool m_IsRegenSuppressed;
         float m_RefillStartEnergyValue;
         float m_RefillTargetEnergyValue;
         float m_RefillElapsed;
@@ -109,6 +110,12 @@ namespace CIS5680VRGame.Gameplay
             if (m_IsRefillInProgress)
                 return;
 
+            if (m_IsRegenSuppressed)
+            {
+                m_RegenTimer = 0f;
+                return;
+            }
+
             if (m_CurrentEnergy >= m_MaxEnergy || m_RegenAmount <= 0)
                 return;
 
@@ -148,6 +155,16 @@ namespace CIS5680VRGame.Gameplay
 
             m_LastInsufficientSignalTime = Time.unscaledTime;
             InsufficientEnergySignaled?.Invoke(m_CurrentEnergy, Mathf.Max(0, requiredAmount));
+        }
+
+        public void SetRegenSuppressed(bool suppressed)
+        {
+            if (m_IsRegenSuppressed == suppressed)
+                return;
+
+            m_IsRegenSuppressed = suppressed;
+            if (suppressed)
+                m_RegenTimer = 0f;
         }
 
         public bool RefillToMax(EnergyChangeReason reason = EnergyChangeReason.RefillStation)

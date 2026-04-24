@@ -42,11 +42,23 @@ namespace CIS5680VRGame.Gameplay
 
         void OnTriggerEnter(Collider other)
         {
+            TryTrigger(other);
+        }
+
+        void OnTriggerStay(Collider other)
+        {
+            TryTrigger(other);
+        }
+
+        void TryTrigger(Collider other)
+        {
             if ((m_OneShot && m_HasTriggered) || !IsPlayerBody(other))
                 return;
 
+            if (m_Controller == null || !m_Controller.HandleZoneTriggered(m_ZoneId))
+                return;
+
             m_HasTriggered = true;
-            m_Controller?.HandleZoneTriggered(m_ZoneId);
         }
 
         bool IsPlayerBody(Collider other)

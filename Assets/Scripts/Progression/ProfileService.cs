@@ -11,13 +11,21 @@ namespace CIS5680VRGame.Progression
         const string SaveFileName = "profile-save.json";
         const int DefaultShopRefreshCost = 1;
         const string TutorialSceneName = "TutorialLevel";
-        const string Maze1SceneName = "Maze1";
+        const string ShopSceneName = "ShopScene";
+        const string DeprecatedMaze1SceneName = "Maze1";
         const string RandomMazeSceneName = "random-maze";
 
         static ProfileService s_Instance;
         static ProfileSaveData s_CurrentProfile;
         static string s_PendingNewGameSceneName;
+        static int s_PendingShopTutorialGoldGrant;
         static bool s_HasAttemptedInitialLoad;
+        static readonly string[] s_ShopTutorialFirstOfferIds =
+        {
+            "upgrade_survey_burst",
+            "upgrade_teleport_landing_pulse_alpha",
+            "upgrade_echo_memory_alpha",
+        };
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Bootstrap()
@@ -41,7 +49,7 @@ namespace CIS5680VRGame.Progression
         public static void BeginNewGameOnSceneLoad(string targetSceneName)
         {
             EnsureCreated();
-            s_Instance.QueueNewGameInitialization(targetSceneName);
+            s_Instance.QueueNewGameInitialization(ResolveFormalGameplaySceneName(targetSceneName));
         }
 
         public static bool TryGetCurrentProfile(out ProfileSaveData profile)
@@ -58,8 +66,22 @@ namespace CIS5680VRGame.Progression
             if (s_CurrentProfile == null || string.IsNullOrWhiteSpace(s_CurrentProfile.continueSceneName))
                 return false;
 
-            continueSceneName = s_CurrentProfile.continueSceneName;
+            continueSceneName = ResolveFormalGameplaySceneName(s_CurrentProfile.continueSceneName);
+            if (string.IsNullOrWhiteSpace(continueSceneName))
+                return false;
+
             return true;
+        }
+
+        public static string ResolveFormalGameplaySceneName(string sceneName)
+        {
+            string normalizedSceneName = NormalizeSceneName(sceneName);
+            if (string.IsNullOrEmpty(normalizedSceneName))
+                return null;
+
+            return string.Equals(normalizedSceneName, DeprecatedMaze1SceneName, StringComparison.Ordinal)
+                ? RandomMazeSceneName
+                : normalizedSceneName;
         }
 
         public static int GetTotalGold()
@@ -76,6 +98,35 @@ namespace CIS5680VRGame.Progression
             EnsureCreated();
             ProfileSaveData profile = s_Instance.EnsureProfileExistsInternal();
             profile.totalGold = Mathf.Max(0, profile.totalGold) + amount;
+            s_Instance.SaveNowInternal();
+        }
+
+        public static void BeginShopTutorialOnSceneLoad(int goldGrant)
+        {
+            EnsureCreated();
+            s_PendingShopTutorialGoldGrant = Mathf.Max(0, goldGrant);
+        }
+
+        public static bool ShouldShowShopTutorial()
+        {
+            EnsureCreated();
+            return s_CurrentProfile == null || !s_CurrentProfile.hasSeenShopTutorial;
+        }
+
+        public static bool HasReceivedShopTutorialGoldGrant()
+        {
+            EnsureCreated();
+            return s_CurrentProfile != null && s_CurrentProfile.hasReceivedShopTutorialGoldGrant;
+        }
+
+        public static void MarkShopTutorialSeen()
+        {
+            EnsureCreated();
+            ProfileSaveData profile = s_Instance.EnsureProfileExistsInternal();
+            if (profile.hasSeenShopTutorial)
+                return;
+
+            profile.hasSeenShopTutorial = true;
             s_Instance.SaveNowInternal();
         }
 
@@ -405,6 +456,8 @@ namespace CIS5680VRGame.Progression
                 s_PendingNewGameSceneName = null;
             }
 
+            ApplyPendingShopTutorialGrant(scene.name);
+
             if (!ShouldTrackContinueScene(scene.name))
                 return;
 
@@ -415,6 +468,76 @@ namespace CIS5680VRGame.Progression
 
             profile.continueSceneName = normalizedSceneName;
             SaveNowInternal();
+        }
+
+        void ApplyPendingShopTutorialGrant(string sceneName)
+        {
+            if (s_PendingShopTutorialGoldGrant <= 0)
+                return;
+
+            string normalizedSceneName = NormalizeSceneName(sceneName);
+            if (!string.Equals(normalizedSceneName, ShopSceneName, StringComparison.Ordinal))
+            {
+                Debug.LogWarning(
+                    $"ProfileService cleared a pending shop tutorial gold grant because scene {sceneName} loaded instead.",
+                    this);
+                s_PendingShopTutorialGoldGrant = 0;
+                return;
+            }
+
+            int goldGrant = s_PendingShopTutorialGoldGrant;
+            s_PendingShopTutorialGoldGrant = 0;
+
+            ProfileSaveData profile = EnsureProfileExistsInternal();
+            if (profile.hasReceivedShopTutorialGoldGrant)
+                return;
+
+            profile.totalGold = Mathf.Max(0, profile.totalGold) + goldGrant;
+            profile.hasReceivedShopTutorialGoldGrant = true;
+            ApplyShopTutorialFirstOffers(profile);
+            SaveNowInternal();
+        }
+
+        void ApplyShopTutorialFirstOffers(ProfileSaveData profile)
+        {
+            if (profile == null)
+                return;
+
+            NormalizeProfileData(profile);
+            profile.shopState.currentOfferIds.Clear();
+            profile.shopState.consumedOfferIndices.Clear();
+
+            int offerCount = Mathf.Max(1, ShopUpgradeCatalog.DefaultOfferCount);
+            for (int i = 0; i < s_ShopTutorialFirstOfferIds.Length && profile.shopState.currentOfferIds.Count < offerCount; i++)
+            {
+                string offerId = s_ShopTutorialFirstOfferIds[i];
+                if (!ShopUpgradeCatalog.TryGetDefinition(offerId, out ShopUpgradeDefinition definition))
+                    continue;
+
+                if (!ShopUpgradeCatalog.CanPurchase(profile, definition))
+                    continue;
+
+                profile.shopState.currentOfferIds.Add(definition.Id);
+            }
+
+            if (profile.shopState.currentOfferIds.Count >= offerCount)
+                return;
+
+            List<string> fallbackOffers = ShopUpgradeCatalog.GenerateOfferIds(
+                profile,
+                offerCount,
+                GenerateShopOfferSeed());
+            for (int i = 0; i < fallbackOffers.Count && profile.shopState.currentOfferIds.Count < offerCount; i++)
+            {
+                string fallbackId = fallbackOffers[i];
+                if (profile.shopState.currentOfferIds.Contains(fallbackId))
+                    continue;
+
+                profile.shopState.currentOfferIds.Add(fallbackId);
+            }
+
+            while (profile.shopState.currentOfferIds.Count < offerCount)
+                profile.shopState.currentOfferIds.Add(ShopUpgradeCatalog.PlaceholderOffer.Id);
         }
 
         void LoadExistingProfileIfPresentInternal()
@@ -550,6 +673,8 @@ namespace CIS5680VRGame.Progression
                 continueSceneName = null,
                 totalGold = 0,
                 completedRandomMazeRuns = 0,
+                hasSeenShopTutorial = false,
+                hasReceivedShopTutorialGoldGrant = false,
                 purchasedUpgradeIds = new System.Collections.Generic.List<string>(),
                 queuedSingleRunUpgradeIds = new System.Collections.Generic.List<string>(),
                 shopState = new ProfileShopStateSaveData
@@ -576,7 +701,6 @@ namespace CIS5680VRGame.Progression
                 return false;
 
             return string.Equals(normalizedSceneName, TutorialSceneName, StringComparison.Ordinal)
-                || string.Equals(normalizedSceneName, Maze1SceneName, StringComparison.Ordinal)
                 || string.Equals(normalizedSceneName, RandomMazeSceneName, StringComparison.Ordinal);
         }
 
@@ -616,7 +740,7 @@ namespace CIS5680VRGame.Progression
             profile.shopState.consumedOfferIndices ??= new System.Collections.Generic.List<int>();
             profile.shopState.freeRefreshCount = Mathf.Max(0, profile.shopState.freeRefreshCount);
             profile.shopState.refreshCost = profile.shopState.refreshCost <= 0 ? DefaultShopRefreshCost : profile.shopState.refreshCost;
-            profile.continueSceneName = NormalizeSceneName(profile.continueSceneName);
+            profile.continueSceneName = ResolveFormalGameplaySceneName(profile.continueSceneName);
             if (!ShouldTrackContinueScene(profile.continueSceneName))
                 profile.continueSceneName = null;
             profile.totalGold = Mathf.Max(0, profile.totalGold);

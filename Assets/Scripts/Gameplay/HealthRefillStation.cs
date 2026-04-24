@@ -20,11 +20,15 @@ namespace CIS5680VRGame.Gameplay
             public const float Cooldown = 20f;
         }
 
+        const int k_UnlimitedUseCount = 999999;
+
         [SerializeField] PlayerHealth m_PlayerHealth;
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] PulseRevealVisual m_PulseVisual;
         [SerializeField] Light m_GlowLight;
         [SerializeField] bool m_OverrideSharedDefaults;
+        [SerializeField] bool m_IgnoreProgressionModifiers;
+        [SerializeField] bool m_UnlimitedUses;
         [SerializeField, Min(1)] int m_MaxUses = SharedDefaults.MaxUses;
         [SerializeField] float m_BaseRestoreAmount = SharedDefaults.BaseRestoreAmount;
         [SerializeField] float m_Cooldown = SharedDefaults.Cooldown;
@@ -82,9 +86,21 @@ namespace CIS5680VRGame.Gameplay
         int m_SingleRunRestoreMultiplierPercent = 100;
         int m_UsesRemaining;
 
-        public int MaxUses => Mathf.Max(1, m_MaxUses + Mathf.Max(0, m_PersistentUseBonus) - Mathf.Max(0, m_SingleRunUsePenalty));
-        public int UsesRemaining => Mathf.Max(0, m_UsesRemaining);
-        public bool IsDepleted => UsesRemaining <= 0;
+        public int MaxUses
+        {
+            get
+            {
+                if (m_UnlimitedUses)
+                    return k_UnlimitedUseCount;
+
+                int useBonus = m_IgnoreProgressionModifiers ? 0 : Mathf.Max(0, m_PersistentUseBonus);
+                int usePenalty = m_IgnoreProgressionModifiers ? 0 : Mathf.Max(0, m_SingleRunUsePenalty);
+                return Mathf.Max(1, m_MaxUses + useBonus - usePenalty);
+            }
+        }
+
+        public int UsesRemaining => m_UnlimitedUses ? MaxUses : Mathf.Max(0, m_UsesRemaining);
+        public bool IsDepleted => !m_UnlimitedUses && UsesRemaining <= 0;
         public bool IsReady => !IsDepleted && Time.time >= m_CooldownEndsAt;
         public bool IsLocatorAvailable => !IsDepleted;
 
@@ -222,7 +238,10 @@ namespace CIS5680VRGame.Gameplay
             if (!m_PlayerHealth.RestoreAmount(GetEffectiveRestoreAmount(), HealthChangeReason.RefillStation))
                 return;
 
-            m_UsesRemaining = Mathf.Max(0, m_UsesRemaining - 1);
+            m_UsesRemaining = m_UnlimitedUses
+                ? MaxUses
+                : Mathf.Max(0, m_UsesRemaining - 1);
+
             if (!IsDepleted)
                 m_CooldownEndsAt = Time.time + GetEffectiveCooldown();
             else
@@ -239,6 +258,9 @@ namespace CIS5680VRGame.Gameplay
 
         float GetEffectiveRestoreAmount()
         {
+            if (m_IgnoreProgressionModifiers)
+                return Mathf.Max(1f, m_BaseRestoreAmount);
+
             float persistentMultiplier = 1f + Mathf.Max(0, m_PersistentRestoreBonusPercent) / 100f;
             float singleRunMultiplier = Mathf.Clamp(m_SingleRunRestoreMultiplierPercent, 1, 1000) / 100f;
             float multiplier = persistentMultiplier * singleRunMultiplier;
@@ -247,6 +269,9 @@ namespace CIS5680VRGame.Gameplay
 
         float GetEffectiveCooldown()
         {
+            if (m_IgnoreProgressionModifiers)
+                return Mathf.Max(0.1f, m_Cooldown);
+
             float multiplier = 1f - (Mathf.Clamp(m_PersistentCooldownReductionPercent, 0, 90) / 100f);
             return Mathf.Max(0.1f, m_Cooldown * multiplier);
         }
@@ -466,6 +491,8 @@ namespace CIS5680VRGame.Gameplay
             if (m_OverrideSharedDefaults)
                 return;
 
+            m_IgnoreProgressionModifiers = false;
+            m_UnlimitedUses = false;
             m_MaxUses = SharedDefaults.MaxUses;
             m_BaseRestoreAmount = SharedDefaults.BaseRestoreAmount;
             m_Cooldown = SharedDefaults.Cooldown;
@@ -473,6 +500,12 @@ namespace CIS5680VRGame.Gameplay
 
         void AdjustRemainingUses(int previousMaxUses, int newMaxUses)
         {
+            if (m_UnlimitedUses)
+            {
+                m_UsesRemaining = MaxUses;
+                return;
+            }
+
             if (m_UsesRemaining <= 0)
                 return;
 

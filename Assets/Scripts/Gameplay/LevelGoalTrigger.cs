@@ -25,7 +25,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Color m_CompletedColor = new(0.22f, 1f, 0.72f, 1f);
         [SerializeField] Color m_CompletedEmissionColor = new(0.08f, 0.9f, 0.55f, 1f);
         [SerializeField] bool m_LogCompletion = true;
-        [SerializeField] Vector3 m_MenuLocalOffset = new(0f, -0.05f, 1.1f);
+        [SerializeField] Vector3 m_MenuLocalOffset = new(0f, -0.36f, 2f);
         [SerializeField] Vector2 m_MenuSize = new(900f, 540f);
         [SerializeField] Vector2 m_ButtonSize = new(240f, 84f);
         [SerializeField] string m_MainMenuSceneName = "MainMenu";
@@ -143,6 +143,8 @@ namespace CIS5680VRGame.Gameplay
         {
             if (m_MenuRoot != null)
             {
+                Camera existingMenuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
+                ModalMenuPauseUtility.RefreshWorldMenuPose(m_MenuRoot, existingMenuCamera, m_MenuLocalOffset);
                 m_MenuRoot.SetActive(true);
                 return;
             }
@@ -152,12 +154,13 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             RectTransform panelRect;
-            m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
+            m_MenuRoot = ModalMenuPauseUtility.CreateWorldSpaceMenuRoot(
                 "LevelCompleteMenu",
                 menuCamera,
                 m_MenuSize,
                 new Color(0f, 0f, 0f, 0.42f),
-                out panelRect);
+                out panelRect,
+                m_MenuLocalOffset);
 
             GameObject panel = panelRect.gameObject;
             Image panelImage = panel.AddComponent<Image>();
@@ -330,6 +333,10 @@ namespace CIS5680VRGame.Gameplay
             label.fontStyle = fontStyle;
             label.color = color;
             label.alignment = TextAlignmentOptions.Center;
+            label.enableWordWrapping = true;
+            label.enableAutoSizing = true;
+            label.fontSizeMax = fontSize;
+            label.fontSizeMin = Mathf.Max(18f, fontSize * 0.65f);
         }
 
         void CreateButton(
@@ -380,6 +387,9 @@ namespace CIS5680VRGame.Gameplay
             buttonLabel.color = Color.white;
             buttonLabel.alignment = TextAlignmentOptions.Center;
             buttonLabel.enableWordWrapping = false;
+            buttonLabel.enableAutoSizing = true;
+            buttonLabel.fontSizeMax = fontSize;
+            buttonLabel.fontSizeMin = 18f;
         }
 
         bool ShouldShowNextLevelButton()

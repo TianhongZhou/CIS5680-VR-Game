@@ -17,6 +17,9 @@ namespace CIS5680VRGame.Gameplay
 {
     public class PauseMenuController : MonoBehaviour
     {
+        static readonly Vector2 k_MinPauseMenuSize = new(720f, 560f);
+        static readonly Vector2 k_PauseMenuSafePadding = new(96f, 72f);
+
         enum ControllerButton
         {
             PrimaryButton,
@@ -32,6 +35,7 @@ namespace CIS5680VRGame.Gameplay
         [Header("Menu Layout")]
         [SerializeField] Vector2 m_MenuSize = new(960f, 620f);
         [SerializeField] Vector2 m_ButtonSize = new(340f, 84f);
+        [SerializeField] Vector3 m_MenuWorldOffset = new(0f, -0.36f, 2f);
         [SerializeField] Vector2 m_PanelOffset = new(0f, -80f);
 
         [Header("Pause Input")]
@@ -131,6 +135,8 @@ namespace CIS5680VRGame.Gameplay
             if (m_MenuRoot == null)
                 return;
 
+            Camera menuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
+            ModalMenuPauseUtility.RefreshWorldMenuPose(m_MenuRoot, menuCamera, m_MenuWorldOffset);
             m_MenuRoot.SetActive(true);
             RefreshMenuLayout();
             m_IsPauseMenuOpen = true;
@@ -205,15 +211,20 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             RectTransform panelRect;
-            m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
+            m_MenuRoot = ModalMenuPauseUtility.CreateWorldSpaceMenuRoot(
                 "PauseMenuCanvas",
                 menuCamera,
                 m_MenuSize,
                 new Color(0f, 0f, 0f, 0.42f),
-                out panelRect);
+                out panelRect,
+                m_MenuWorldOffset);
             m_PanelRect = panelRect;
 
-            panelRect.anchoredPosition = m_PanelOffset;
+            ModalMenuPauseUtility.ConfigureCenteredSafePanel(
+                panelRect,
+                ResolveMenuSize(),
+                k_PauseMenuSafePadding,
+                k_MinPauseMenuSize);
 
             GameObject panel = panelRect.gameObject;
             Image panelImage = panel.AddComponent<Image>();
@@ -297,6 +308,17 @@ namespace CIS5680VRGame.Gameplay
             m_MenuRoot.SetActive(false);
         }
 
+        Vector2 ResolveMenuSize()
+        {
+            Vector2 preferredSize = new(
+                Mathf.Max(m_MenuSize.x, k_MinPauseMenuSize.x),
+                Mathf.Max(m_MenuSize.y, k_MinPauseMenuSize.y));
+            return ModalMenuPauseUtility.ClampPanelSize(
+                preferredSize,
+                k_PauseMenuSafePadding,
+                k_MinPauseMenuSize);
+        }
+
         void RefreshMenuLayout()
         {
             if (m_MenuRoot == null || m_PanelRect == null)
@@ -353,6 +375,9 @@ namespace CIS5680VRGame.Gameplay
             label.fontStyle = fontStyle;
             label.color = color;
             label.alignment = TextAlignmentOptions.Center;
+            label.enableAutoSizing = true;
+            label.fontSizeMax = fontSize;
+            label.fontSizeMin = Mathf.Max(22f, fontSize * 0.7f);
         }
 
         void CreateButton(
@@ -402,6 +427,9 @@ namespace CIS5680VRGame.Gameplay
             buttonLabel.color = Color.white;
             buttonLabel.alignment = TextAlignmentOptions.Center;
             buttonLabel.enableWordWrapping = false;
+            buttonLabel.enableAutoSizing = true;
+            buttonLabel.fontSizeMax = 30f;
+            buttonLabel.fontSizeMin = 18f;
         }
     }
 }

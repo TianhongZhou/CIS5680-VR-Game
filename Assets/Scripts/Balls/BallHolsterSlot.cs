@@ -42,6 +42,7 @@ namespace CIS5680VRGame.Balls
             ? m_PlayerEnergy.CurrentEnergy >= m_PlayerEnergy.MaxEnergy
             : IsInfinite || m_RemainingCount >= m_StartingCount;
         public BallType BallType => GetResolvedBallType();
+        public GameObject ThrowableBallPrefab => m_ThrowableBallPrefab;
 
         void Awake()
         {
@@ -249,7 +250,7 @@ namespace CIS5680VRGame.Balls
             var selectors = interactable.interactorsSelecting;
             for (int i = 0; i < selectors.Count; i++)
             {
-                if (selectors[i] == null || selectors[i] == m_SocketInteractor)
+                if (selectors[i] == null || ReferenceEquals(selectors[i], m_SocketInteractor))
                     continue;
 
                 return true;

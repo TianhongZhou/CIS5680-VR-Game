@@ -12,6 +12,8 @@ namespace CIS5680VRGame.Progression
         public string continueSceneName;
         public int totalGold;
         public int completedRandomMazeRuns;
+        public bool hasSeenShopTutorial;
+        public bool hasReceivedShopTutorialGoldGrant;
         public List<string> purchasedUpgradeIds = new();
         public List<string> queuedSingleRunUpgradeIds = new();
         public ProfileShopStateSaveData shopState = new();

@@ -17,6 +17,7 @@ namespace CIS5680VRGame.Balls
         int m_BonusPulseRadiusPercent;
         int m_BonusPulseRevealDurationSeconds;
         int m_SingleRunLandingPulseRevealDurationBonusPercent;
+        bool m_LastImpactBecameAnchor;
 
         void Awake()
         {
@@ -31,6 +32,29 @@ namespace CIS5680VRGame.Balls
         }
 
         public override void Apply(in BallImpactContext context)
+        {
+            m_LastImpactBecameAnchor = false;
+
+            if (TeleportBallLauncher.TryRegisterAnchor(this, context))
+            {
+                m_LastImpactBecameAnchor = true;
+                return;
+            }
+
+            TeleportNow(context);
+        }
+
+        public override bool ShouldDestroyBallAfterImpact(in BallImpactContext context)
+        {
+            return !m_LastImpactBecameAnchor;
+        }
+
+        public void ConfirmAnchoredTeleport(in BallImpactContext context)
+        {
+            TeleportNow(context);
+        }
+
+        void TeleportNow(in BallImpactContext context)
         {
             if (m_XROrigin == null && m_FallbackRigRoot == null)
                 return;
@@ -86,7 +110,7 @@ namespace CIS5680VRGame.Balls
                 context.HitPoint,
                 context.HitNormal,
                 pulseRadius,
-                context.Collision.collider,
+                context.HitCollider,
                 revealDurationSeconds);
             PulseAudioService.PlayPulse(context.HitPoint);
         }

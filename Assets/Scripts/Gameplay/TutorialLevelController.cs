@@ -11,15 +11,23 @@ namespace CIS5680VRGame.Gameplay
 {
     public class TutorialLevelController : MonoBehaviour
     {
+        static readonly Vector2 k_MinMessagePanelSize = new(840f, 320f);
+        static readonly Vector2 k_MessagePanelSafePadding = new(96f, 72f);
+        const float k_TutorialLocatorRange = 30f;
+        const float k_TutorialLocatorHalfAngle = 60f;
+
         enum TutorialStep
         {
             Move,
             SwitchMode,
             Sonar,
-            Jump,
+            StickyPulse,
+            Teleport,
             Trap,
-            Refill,
+            EnergyRefill,
+            HealthRefill,
             Locator,
+            EnemyChase,
             ReachGoal,
             Completed,
         }
@@ -33,7 +41,13 @@ namespace CIS5680VRGame.Gameplay
 
         [Header("Tutorial UI")]
         [SerializeField] Vector2 m_MessagePanelSize = new(780f, 260f);
+        [SerializeField] Vector3 m_MessageWorldOffset = new(0f, -0.42f, 2f);
         [SerializeField] Vector2 m_MessagePanelOffset = new(0f, 240f);
+
+        [Header("Tutorial Safety")]
+        [SerializeField] bool m_StartSlightlyBelowMaxHealth = true;
+        [SerializeField, Min(1)] int m_HealthMissingForRefillLesson = 1;
+        [SerializeField, Min(0f)] float m_HealthRefillFallbackCompletionDelay = 30f;
 
         GameObject m_MessageRoot;
         RectTransform m_MessagePanelRect;
@@ -45,7 +59,8 @@ namespace CIS5680VRGame.Gameplay
         bool m_InitialMovementModeResolved;
         MovementModeManager.MovementMode m_InitialMovementMode;
         Collider m_SonarTargetVolume;
-        Coroutine m_SonarPulseCompletionRoutine;
+        TeleportBallLauncher m_TeleportLauncher;
+        Coroutine m_DelayedStepCompletionRoutine;
         readonly Dictionary<string, GameObject> m_TutorialObjects = new();
         readonly List<BallHolsterSlot> m_TutorialBallSlots = new();
 
@@ -58,6 +73,9 @@ namespace CIS5680VRGame.Gameplay
         const string Step05CompleteZone = "Step05_Trap_Complete";
         const string Step06MessageZone = "Step06_Refill_Message";
         const string Step07MessageZone = "Step07_Locator_Message";
+        const string Step08EnemyMessageZone = "Step08_Enemy_Message";
+        const string Step08EnemyCompleteZone = "Step08_Enemy_Complete";
+        const string TutorialGoalScanBlocker = "TutorialGoalScanBlocker";
 
         void Reset()
         {
@@ -75,6 +93,7 @@ namespace CIS5680VRGame.Gameplay
         void OnEnable()
         {
             SonarPulseImpactEffect.PulseSpawned += OnSonarPulseSpawned;
+            StickyPulseImpactEffect.PulseSpawned += OnStickyPulseSpawned;
             RefillStationLocatorGuidance.GuidancePingTriggered += OnLocatorPingTriggered;
 
             if (m_PlayerEnergy != null)
@@ -86,18 +105,23 @@ namespace CIS5680VRGame.Gameplay
 
         void Start()
         {
+            EnsureHealthRefillLessonCanRestore();
             BeginStep(TutorialStep.Move);
         }
 
         void OnDisable()
         {
             SonarPulseImpactEffect.PulseSpawned -= OnSonarPulseSpawned;
+            StickyPulseImpactEffect.PulseSpawned -= OnStickyPulseSpawned;
             RefillStationLocatorGuidance.GuidancePingTriggered -= OnLocatorPingTriggered;
 
-            CancelPendingSonarPulseCompletion();
+            CancelPendingDelayedStepCompletion();
 
             if (m_PlayerEnergy != null)
+            {
                 m_PlayerEnergy.RefillStarted -= OnEnergyRefillStarted;
+                m_PlayerEnergy.SetRegenSuppressed(false);
+            }
 
             if (m_PlayerHealth != null)
                 m_PlayerHealth.HealthChangedDetailed -= OnHealthChanged;
@@ -113,12 +137,14 @@ namespace CIS5680VRGame.Gameplay
             else
                 DestroyImmediate(m_MessageRoot);
 
-            CancelPendingSonarPulseCompletion();
+            CancelPendingDelayedStepCompletion();
         }
 
         void Update()
         {
             ResolveReferences();
+            UpdateTutorialAbilityAvailability();
+            SynchronizeGateLocks();
 
             if (m_CurrentStep == TutorialStep.SwitchMode && m_HasShownCurrentMessage && m_MovementModeManager != null)
             {
@@ -146,30 +172,40 @@ namespace CIS5680VRGame.Gameplay
             HideMessage();
         }
 
-        public void HandleZoneTriggered(string zoneId)
+        public bool HandleZoneTriggered(string zoneId)
         {
             if (string.IsNullOrWhiteSpace(zoneId))
-                return;
+                return false;
 
             switch (zoneId)
             {
                 case Step01CompleteZone when m_CurrentStep == TutorialStep.Move:
                     CompleteCurrentStep();
-                    break;
+                    return true;
 
                 case Step02MessageZone when m_CurrentStep == TutorialStep.SwitchMode:
                 case Step03MessageZone when m_CurrentStep == TutorialStep.Sonar:
-                case Step04MessageZone when m_CurrentStep == TutorialStep.Jump:
+                case Step04MessageZone when m_CurrentStep == TutorialStep.Teleport:
                 case Step05MessageZone when m_CurrentStep == TutorialStep.Trap:
-                case Step06MessageZone when m_CurrentStep == TutorialStep.Refill:
+                case Step06MessageZone when m_CurrentStep == TutorialStep.EnergyRefill:
+                case Step06MessageZone when m_CurrentStep == TutorialStep.HealthRefill:
                 case Step07MessageZone when m_CurrentStep == TutorialStep.Locator:
+                case Step08EnemyMessageZone when m_CurrentStep == TutorialStep.EnemyChase:
                     ShowCurrentStepMessage();
-                    break;
+                    return true;
 
-                case Step04CompleteZone when m_CurrentStep == TutorialStep.Jump:
+                case Step04CompleteZone when m_CurrentStep == TutorialStep.Teleport:
                 case Step05CompleteZone when m_CurrentStep == TutorialStep.Trap:
+                case Step08EnemyCompleteZone when m_CurrentStep == TutorialStep.EnemyChase && m_HasShownCurrentMessage:
                     CompleteCurrentStep();
-                    break;
+                    return true;
+
+                case Step08EnemyCompleteZone when m_CurrentStep == TutorialStep.EnemyChase:
+                    ShowCurrentStepMessage();
+                    return true;
+
+                default:
+                    return false;
             }
         }
 
@@ -186,6 +222,9 @@ namespace CIS5680VRGame.Gameplay
 
             if (m_PlayerHealth == null)
                 m_PlayerHealth = FindObjectOfType<PlayerHealth>();
+
+            if (m_TeleportLauncher == null)
+                m_TeleportLauncher = FindObjectOfType<TeleportBallLauncher>();
         }
 
         void ResolveTutorialObjects()
@@ -247,14 +286,21 @@ namespace CIS5680VRGame.Gameplay
             SetObjectActive("Step03_Beacon", false);
             SetObjectActive("Step03_SonarTarget", false);
             SetObjectActive("Step04_Beacon", false);
+            SetObjectActive("Step04_TeleportBlocker", false);
             SetObjectActive("Step05_Beacon", false);
             SetObjectActive("Step06_Beacon", false);
             SetObjectActive("Step07_Beacon", false);
+            SetObjectActive("Step08_Beacon", false);
+            SetObjectActive("TutorialEnemyScout", false);
+            SetObjectActive(TutorialGoalScanBlocker, true);
 
             SetObjectActive("Step02_Gate", true);
             SetObjectActive("Step03_Gate", true);
             SetObjectActive("Step06_Gate", true);
             SetObjectActive("Step07_Gate", true);
+            SetBallSlotAvailability(BallType.Sonar, false);
+            SetBallSlotAvailability(BallType.StickyPulse, false);
+            SetBallSlotAvailability(BallType.Teleport, false);
 
             if (m_TutorialGoal != null)
             {
@@ -263,21 +309,28 @@ namespace CIS5680VRGame.Gameplay
             }
 
             UpdateTutorialEnergyRules();
+            UpdateTutorialAbilityAvailability();
         }
 
         void BeginStep(TutorialStep step)
         {
-            if (step != TutorialStep.Sonar)
-                CancelPendingSonarPulseCompletion();
+            CancelPendingDelayedStepCompletion();
 
             m_CurrentStep = step;
             m_HasShownCurrentMessage = false;
             HideMessage();
             UpdateBeaconVisibility(step);
             UpdateTutorialEnergyRules();
+            UpdateTutorialAbilityAvailability();
+            SynchronizeGateLocks();
 
-            if (step == TutorialStep.Move || step == TutorialStep.ReachGoal)
+            if (step == TutorialStep.Move
+                || step == TutorialStep.StickyPulse
+                || step == TutorialStep.HealthRefill
+                || step == TutorialStep.ReachGoal)
+            {
                 ShowCurrentStepMessage();
+            }
 
             if (step == TutorialStep.SwitchMode && m_MovementModeManager != null)
             {
@@ -300,25 +353,41 @@ namespace CIS5680VRGame.Gameplay
                     break;
 
                 case TutorialStep.Sonar:
-                    SetObjectActive("Step03_Gate", false);
-                    BeginStep(TutorialStep.Jump);
+                    BeginStep(TutorialStep.StickyPulse);
                     break;
 
-                case TutorialStep.Jump:
+                case TutorialStep.StickyPulse:
+                    SetObjectActive("Step03_Gate", false);
+                    SetObjectActive("Step04_TeleportBlocker", true);
+                    BeginStep(TutorialStep.Teleport);
+                    break;
+
+                case TutorialStep.Teleport:
+                    SetObjectActive("Step04_TeleportBlocker", false);
                     BeginStep(TutorialStep.Trap);
                     break;
 
                 case TutorialStep.Trap:
-                    BeginStep(TutorialStep.Refill);
+                    BeginStep(TutorialStep.EnergyRefill);
                     break;
 
-                case TutorialStep.Refill:
+                case TutorialStep.EnergyRefill:
+                    BeginStep(TutorialStep.HealthRefill);
+                    break;
+
+                case TutorialStep.HealthRefill:
                     SetObjectActive("Step06_Gate", false);
                     BeginStep(TutorialStep.Locator);
                     break;
 
                 case TutorialStep.Locator:
                     SetObjectActive("Step07_Gate", false);
+                    SetObjectActive(TutorialGoalScanBlocker, false);
+                    BeginStep(TutorialStep.EnemyChase);
+                    break;
+
+                case TutorialStep.EnemyChase:
+                    SetObjectActive("TutorialEnemyScout", false);
                     SwitchTutorialGoalMode(useTutorialGoal: true);
                     BeginStep(TutorialStep.ReachGoal);
                     break;
@@ -335,11 +404,12 @@ namespace CIS5680VRGame.Gameplay
         {
             SetObjectActive("Step01_Beacon", activeStep == TutorialStep.Move);
             SetObjectActive("Step02_Beacon", activeStep == TutorialStep.SwitchMode);
-            SetObjectActive("Step03_Beacon", activeStep == TutorialStep.Sonar);
-            SetObjectActive("Step04_Beacon", activeStep == TutorialStep.Jump);
+            SetObjectActive("Step03_Beacon", activeStep == TutorialStep.Sonar || activeStep == TutorialStep.StickyPulse);
+            SetObjectActive("Step04_Beacon", activeStep == TutorialStep.Teleport);
             SetObjectActive("Step05_Beacon", activeStep == TutorialStep.Trap);
-            SetObjectActive("Step06_Beacon", activeStep == TutorialStep.Refill);
+            SetObjectActive("Step06_Beacon", activeStep == TutorialStep.EnergyRefill || activeStep == TutorialStep.HealthRefill);
             SetObjectActive("Step07_Beacon", activeStep == TutorialStep.Locator);
+            SetObjectActive("Step08_Beacon", activeStep == TutorialStep.EnemyChase);
         }
 
         void ShowCurrentStepMessage()
@@ -351,11 +421,24 @@ namespace CIS5680VRGame.Gameplay
             ShowMessage(content.title, content.body);
             m_HasShownCurrentMessage = true;
 
-            if (m_CurrentStep == TutorialStep.Sonar && !m_HasUnlockedNormalEnergyCosts)
+            if (m_CurrentStep == TutorialStep.EnergyRefill && !m_HasUnlockedNormalEnergyCosts)
             {
                 m_HasUnlockedNormalEnergyCosts = true;
                 UpdateTutorialEnergyRules();
+                UpdateTutorialAbilityAvailability();
             }
+
+            if (m_CurrentStep == TutorialStep.HealthRefill
+                && m_DelayedStepCompletionRoutine == null
+                && m_HealthRefillFallbackCompletionDelay > 0f)
+            {
+                m_DelayedStepCompletionRoutine = StartCoroutine(CompleteStepAfterDelay(
+                    TutorialStep.HealthRefill,
+                    m_HealthRefillFallbackCompletionDelay));
+            }
+
+            if (m_CurrentStep == TutorialStep.EnemyChase)
+                ActivateTutorialEnemyScout();
         }
 
         (string title, string body) GetStepContent(TutorialStep step)
@@ -364,35 +447,47 @@ namespace CIS5680VRGame.Gameplay
             {
                 TutorialStep.Move => (
                     "Move Forward",
-                    "Push the left thumbstick to move to the next marker."),
+                    "Push the left thumbstick to move.\nFollow the marker."),
 
                 TutorialStep.SwitchMode => (
                     "Switch Movement",
-                    "Press X to swap movement modes.\n Try the alternate locomotion once to continue."),
+                    "Press X once to swap movement modes.\nTry the alternate locomotion once to continue."),
 
                 TutorialStep.Sonar => (
                     "Use the Sonar Ball",
-                    "Grab a Sonar Ball and send its pulse wave \n into the glowing beacon to continue."),
+                    "A Sonar Ball reveals one burst of hidden space.\nGrab one and send its pulse wave into the glowing beacon."),
 
-                TutorialStep.Jump => (
-                    "Jump Over Obstacles",
-                    "Press A to jump. You can jump twice before landing. \n Clear the obstacle ahead."),
+                TutorialStep.StickyPulse => (
+                    "Use the Sticky Pulse Ball",
+                    "A Sticky Pulse Ball keeps revealing an area for longer.\nStick it near a place you will pass more than once, then move through while it keeps pulsing."),
+
+                TutorialStep.Teleport => (
+                    "Teleport Movement",
+                    "Hold A to preview a teleport ball arc.\nRelease A to fire it, then press A again to teleport or press B to cancel. Clear the obstacle ahead."),
 
                 TutorialStep.Trap => (
                     "Avoid the Trap",
-                    "Use a Sonar Ball to reveal the trap floor, \n then cross on the safe side."),
+                    "Use a Sonar Ball to reveal the trap floor,\nthen cross on the safe side."),
 
-                TutorialStep.Refill => (
-                    "Recover Resources",
-                    "Stand on the energy refill pad to restore energy, \n or use the grab button to pick up the health device \n and recover health."),
+                TutorialStep.EnergyRefill => (
+                    "Manage Energy",
+                    "From now on, throwing balls uses energy.\nCheck the right side of your right controller for your energy gauge.\nThrow a ball, then step onto the energy refill pad and watch it recover."),
+
+                TutorialStep.HealthRefill => (
+                    "Manage Health",
+                    "Low health slowly regenerates up to a cap.\nCheck the left side of your left controller for your health gauge.\nPoint your hand at the health station and press Grip to restore more at once."),
 
                 TutorialStep.Locator => (
-                    "Ping the Goal",
-                    "Push the right thumbstick forward to scan for the refill station \n and the exit beacon."),
+                    "Find the Exit Direction",
+                    "Stop at the fork and listen for the exit ambience.\nTurn toward the sound, then push the right thumbstick forward to scan up to 30m."),
+
+                TutorialStep.EnemyChase => (
+                    "Enemy Alert",
+                    "A scout is chasing you.\nKeep moving or teleport away, then reach the next marker."),
 
                 TutorialStep.ReachGoal => (
                     "Tutorial Complete",
-                    "Step into the exit beacon to begin the real maze."),
+                    "You can collect coins in the maze and spend them in the shop.\nStep into the exit beacon to continue to the shop tutorial."),
 
                 _ => (string.Empty, string.Empty),
             };
@@ -406,6 +501,8 @@ namespace CIS5680VRGame.Gameplay
 
             m_MessageTitle.text = title;
             m_MessageBody.text = body;
+            Camera menuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
+            ModalMenuPauseUtility.RefreshWorldMenuPose(m_MessageRoot, menuCamera, m_MessageWorldOffset);
             m_MessageRoot.SetActive(true);
             ModalMenuPauseUtility.RefreshMenuLayout(m_MessageRoot, m_MessagePanelRect);
         }
@@ -425,27 +522,19 @@ namespace CIS5680VRGame.Gameplay
             if (menuCamera == null)
                 return;
 
-            m_MessageRoot = new GameObject("TutorialMessageCanvas");
+            m_MessageRoot = ModalMenuPauseUtility.CreateWorldSpaceMenuRoot(
+                "TutorialMessageCanvas",
+                menuCamera,
+                ResolveMessagePanelSize(),
+                Color.clear,
+                out m_MessagePanelRect,
+                m_MessageWorldOffset);
 
-            Canvas canvas = m_MessageRoot.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceCamera;
-            canvas.worldCamera = menuCamera;
-            canvas.planeDistance = Mathf.Max(menuCamera.nearClipPlane + 0.16f, 0.7f);
-            canvas.sortingOrder = 4200;
+            Canvas canvas = m_MessageRoot.GetComponent<Canvas>();
+            if (canvas != null)
+                canvas.sortingOrder = 4200;
 
-            CanvasScaler scaler = m_MessageRoot.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1600f, 900f);
-            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0.5f;
-
-            GameObject panel = ModalMenuPauseUtility.CreateUIObject("Panel", m_MessageRoot.transform);
-            m_MessagePanelRect = panel.GetComponent<RectTransform>();
-            m_MessagePanelRect.anchorMin = new Vector2(0.5f, 0.5f);
-            m_MessagePanelRect.anchorMax = new Vector2(0.5f, 0.5f);
-            m_MessagePanelRect.pivot = new Vector2(0.5f, 0.5f);
-            m_MessagePanelRect.sizeDelta = m_MessagePanelSize;
-            m_MessagePanelRect.anchoredPosition = m_MessagePanelOffset;
+            GameObject panel = m_MessagePanelRect.gameObject;
 
             Image panelImage = panel.AddComponent<Image>();
             panelImage.color = new Color(0.02f, 0.04f, 0.07f, 0.9f);
@@ -469,7 +558,7 @@ namespace CIS5680VRGame.Gameplay
                 42f,
                 FontStyles.Bold,
                 new Color(0.92f, 0.98f, 1f, 1f),
-                60f);
+                58f);
 
             m_MessageBody = CreateLabel(
                 "Body",
@@ -478,10 +567,21 @@ namespace CIS5680VRGame.Gameplay
                 22f,
                 FontStyles.Normal,
                 new Color(0.74f, 0.88f, 0.98f, 1f),
-                110f);
+                188f);
             m_MessageBody.enableWordWrapping = true;
 
             m_MessageRoot.SetActive(false);
+        }
+
+        Vector2 ResolveMessagePanelSize()
+        {
+            Vector2 preferredSize = new(
+                Mathf.Max(m_MessagePanelSize.x, k_MinMessagePanelSize.x),
+                Mathf.Max(m_MessagePanelSize.y, k_MinMessagePanelSize.y));
+            return ModalMenuPauseUtility.ClampPanelSize(
+                preferredSize,
+                k_MessagePanelSafePadding,
+                k_MinMessagePanelSize);
         }
 
         TextMeshProUGUI CreateLabel(
@@ -504,6 +604,9 @@ namespace CIS5680VRGame.Gameplay
             label.color = color;
             label.alignment = TextAlignmentOptions.Center;
             label.raycastTarget = false;
+            label.enableAutoSizing = true;
+            label.fontSizeMax = fontSize;
+            label.fontSizeMin = Mathf.Max(16f, fontSize * 0.65f);
             return label;
         }
 
@@ -514,6 +617,65 @@ namespace CIS5680VRGame.Gameplay
 
             if (targetObject != null)
                 targetObject.SetActive(active);
+        }
+
+        void ActivateTutorialEnemyScout()
+        {
+            if (!m_TutorialObjects.TryGetValue("TutorialEnemyScout", out GameObject enemyObject) || enemyObject == null)
+                return;
+
+            Vector3 targetPosition = ResolvePlayerAnchorPosition();
+            EnemyPatrolController enemyController = enemyObject.GetComponent<EnemyPatrolController>();
+
+            if (enemyController != null)
+                enemyController.FaceToward(targetPosition);
+            else
+                FaceTransformToward(enemyObject.transform, targetPosition);
+
+            enemyObject.SetActive(true);
+
+            if (enemyController == null)
+                enemyController = enemyObject.GetComponent<EnemyPatrolController>();
+
+            if (enemyController == null)
+                return;
+
+            enemyController.SetRoamCenter(enemyObject.transform.position);
+            enemyController.SetDetectionRangeMultiplier(4f);
+            enemyController.SetPursuitLockDistanceMultiplier(4f);
+            enemyController.SetFieldOfViewMultiplier(4f);
+            enemyController.ForceChaseTarget(targetPosition);
+        }
+
+        Vector3 ResolvePlayerAnchorPosition()
+        {
+            if (m_PlayerRig != null)
+                return m_PlayerRig.transform.position;
+
+            Transform viewTransform = ResolveViewTransform();
+            return viewTransform != null ? viewTransform.position : transform.position;
+        }
+
+        void FaceTransformToward(Transform source, Vector3 targetPosition)
+        {
+            if (source == null)
+                return;
+
+            Vector3 lookDirection = Vector3.ProjectOnPlane(targetPosition - source.position, Vector3.up);
+            if (lookDirection.sqrMagnitude < 0.0001f)
+                return;
+
+            source.rotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
+        }
+
+        void SynchronizeGateLocks()
+        {
+            SetObjectActive("Step02_Gate", m_CurrentStep <= TutorialStep.SwitchMode);
+            SetObjectActive("Step03_Gate", m_CurrentStep <= TutorialStep.StickyPulse);
+            SetObjectActive("Step04_TeleportBlocker", m_CurrentStep == TutorialStep.Teleport);
+            SetObjectActive("Step06_Gate", m_CurrentStep <= TutorialStep.HealthRefill);
+            SetObjectActive("Step07_Gate", m_CurrentStep <= TutorialStep.Locator);
+            SetObjectActive(TutorialGoalScanBlocker, m_CurrentStep <= TutorialStep.Locator);
         }
 
         void SwitchTutorialGoalMode(bool useTutorialGoal)
@@ -544,9 +706,57 @@ namespace CIS5680VRGame.Gameplay
             }
         }
 
+        void UpdateTutorialAbilityAvailability()
+        {
+            SetBallSlotAvailability(BallType.Sonar, IsStepUnlocked(TutorialStep.Sonar));
+            SetBallSlotAvailability(BallType.StickyPulse, IsStepUnlocked(TutorialStep.StickyPulse));
+            SetBallSlotAvailability(BallType.Teleport, false);
+
+            if (m_TeleportLauncher != null)
+                m_TeleportLauncher.enabled = IsStepUnlocked(TutorialStep.Teleport);
+
+            if (m_PlayerEnergy != null)
+                m_PlayerEnergy.SetRegenSuppressed(!m_HasUnlockedNormalEnergyCosts);
+        }
+
+        void EnsureHealthRefillLessonCanRestore()
+        {
+            if (!m_StartSlightlyBelowMaxHealth || m_PlayerHealth == null)
+                return;
+
+            int missingHealth = Mathf.Max(1, m_HealthMissingForRefillLesson);
+            int maxHealth = m_PlayerHealth.MaxHealth;
+            if (maxHealth <= missingHealth || m_PlayerHealth.CurrentHealth < maxHealth)
+                return;
+
+            m_PlayerHealth.ApplyDamage(missingHealth, HealthChangeReason.DirectSet);
+        }
+
+        bool IsStepUnlocked(TutorialStep step)
+        {
+            return m_CurrentStep != TutorialStep.Completed && m_CurrentStep >= step;
+        }
+
+        void SetBallSlotAvailability(BallType ballType, bool available)
+        {
+            for (int i = 0; i < m_TutorialBallSlots.Count; i++)
+            {
+                BallHolsterSlot ballSlot = m_TutorialBallSlots[i];
+                if (ballSlot == null || ballSlot.BallType != ballType)
+                    continue;
+
+                GameObject slotObject = ballSlot.gameObject;
+                if (slotObject != null && slotObject.activeSelf != available)
+                    slotObject.SetActive(available);
+            }
+        }
+
         void OnSonarPulseSpawned(Vector3 pulseOrigin, float pulseRadius, Collider sourceCollider)
         {
-            if (m_CurrentStep != TutorialStep.Sonar || !m_HasShownCurrentMessage || m_SonarTargetVolume == null || m_SonarPulseCompletionRoutine != null)
+            if (!m_HasShownCurrentMessage || m_DelayedStepCompletionRoutine != null)
+                return;
+
+            if (m_CurrentStep != TutorialStep.Sonar || m_SonarTargetVolume == null)
                 return;
 
             Vector3 closestPoint = m_SonarTargetVolume.ClosestPoint(pulseOrigin);
@@ -556,18 +766,26 @@ namespace CIS5680VRGame.Gameplay
 
             float pulseSpeed = PulseManager.Instance != null ? Mathf.Max(0.01f, PulseManager.Instance.pulseSpeed) : 8f;
             float travelDelay = Mathf.Max(0f, distanceToTarget / pulseSpeed);
-            m_SonarPulseCompletionRoutine = StartCoroutine(CompleteSonarStepAfterDelay(travelDelay));
+            m_DelayedStepCompletionRoutine = StartCoroutine(CompleteStepAfterDelay(TutorialStep.Sonar, travelDelay));
+        }
+
+        void OnStickyPulseSpawned(Vector3 pulseOrigin, float pulseRadius, Collider sourceCollider)
+        {
+            if (m_CurrentStep != TutorialStep.StickyPulse || !m_HasShownCurrentMessage || m_DelayedStepCompletionRoutine != null)
+                return;
+
+            m_DelayedStepCompletionRoutine = StartCoroutine(CompleteStepAfterDelay(TutorialStep.StickyPulse, 1f));
         }
 
         void OnEnergyRefillStarted()
         {
-            if (m_CurrentStep == TutorialStep.Refill && m_HasShownCurrentMessage)
+            if (m_CurrentStep == TutorialStep.EnergyRefill && m_HasShownCurrentMessage)
                 CompleteCurrentStep();
         }
 
         void OnHealthChanged(HealthChangeContext context)
         {
-            if (m_CurrentStep != TutorialStep.Refill || !m_HasShownCurrentMessage)
+            if (m_CurrentStep != TutorialStep.HealthRefill || !m_HasShownCurrentMessage)
                 return;
 
             if (context.Reason == HealthChangeReason.RefillStation && context.Delta > 0)
@@ -576,30 +794,68 @@ namespace CIS5680VRGame.Gameplay
 
         void OnLocatorPingTriggered()
         {
-            if (m_CurrentStep == TutorialStep.Locator && m_HasShownCurrentMessage)
+            if (m_CurrentStep == TutorialStep.Locator
+                && m_HasShownCurrentMessage
+                && IsTutorialGoalInsideInitialLocatorScan())
+            {
                 CompleteCurrentStep();
+            }
         }
 
-        IEnumerator CompleteSonarStepAfterDelay(float delay)
+        bool IsTutorialGoalInsideInitialLocatorScan()
+        {
+            if (m_TutorialGoal == null)
+                return true;
+
+            Transform viewTransform = ResolveViewTransform();
+            if (viewTransform == null)
+                return true;
+
+            Vector3 toGoal = Vector3.ProjectOnPlane(m_TutorialGoal.transform.position - viewTransform.position, Vector3.up);
+            if (toGoal.sqrMagnitude < 0.0001f)
+                return true;
+
+            if (toGoal.sqrMagnitude > k_TutorialLocatorRange * k_TutorialLocatorRange)
+                return false;
+
+            Vector3 forward = Vector3.ProjectOnPlane(viewTransform.forward, Vector3.up);
+            if (forward.sqrMagnitude < 0.0001f)
+                forward = Vector3.forward;
+
+            return Vector3.Angle(forward.normalized, toGoal.normalized) <= k_TutorialLocatorHalfAngle;
+        }
+
+        Transform ResolveViewTransform()
+        {
+            if (m_PlayerRig != null && m_PlayerRig.Camera != null)
+                return m_PlayerRig.Camera.transform;
+
+            if (Camera.main != null)
+                return Camera.main.transform;
+
+            return m_PlayerRig != null ? m_PlayerRig.transform : transform;
+        }
+
+        IEnumerator CompleteStepAfterDelay(TutorialStep expectedStep, float delay)
         {
             if (delay > 0f)
                 yield return new WaitForSeconds(delay);
 
-            m_SonarPulseCompletionRoutine = null;
+            m_DelayedStepCompletionRoutine = null;
 
-            if (m_CurrentStep != TutorialStep.Sonar || !m_HasShownCurrentMessage)
+            if (m_CurrentStep != expectedStep || !m_HasShownCurrentMessage)
                 yield break;
 
             CompleteCurrentStep();
         }
 
-        void CancelPendingSonarPulseCompletion()
+        void CancelPendingDelayedStepCompletion()
         {
-            if (m_SonarPulseCompletionRoutine == null)
+            if (m_DelayedStepCompletionRoutine == null)
                 return;
 
-            StopCoroutine(m_SonarPulseCompletionRoutine);
-            m_SonarPulseCompletionRoutine = null;
+            StopCoroutine(m_DelayedStepCompletionRoutine);
+            m_DelayedStepCompletionRoutine = null;
         }
     }
 }

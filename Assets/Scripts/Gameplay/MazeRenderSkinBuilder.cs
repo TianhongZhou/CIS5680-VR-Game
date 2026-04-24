@@ -32,6 +32,7 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField, Min(0.01f)] float m_UvScale = 1f;
         [SerializeField] bool m_IncludeBoundaryWalls = true;
         [SerializeField] bool m_IncludeWallTopFaces = false;
+        [SerializeField] string[] m_ExcludedColliderNameContains = { "_Gate", "TeleportBlocker" };
 
         public void AutoAssignSceneReferences()
         {
@@ -517,10 +518,10 @@ namespace CIS5680VRGame.Gameplay
 
         void AppendFloorGeometry(List<FaceRecord> faceRecords)
         {
-            if (TryAppendFloorTilePatches(faceRecords))
-                return;
+            if (m_FloorMeshFilter != null && m_FloorMeshFilter.sharedMesh != null)
+                AppendFloorMeshPatch(faceRecords);
 
-            AppendFloorMeshPatch(faceRecords);
+            TryAppendFloorTilePatches(faceRecords);
         }
 
         bool TryAppendFloorTilePatches(List<FaceRecord> faceRecords)
@@ -623,6 +624,9 @@ namespace CIS5680VRGame.Gameplay
                 if (IsFloorCollider(collider))
                     continue;
 
+                if (ShouldExcludeColliderFromRenderSkin(collider))
+                    continue;
+
                 colliders.Add(collider);
             }
         }
@@ -636,6 +640,34 @@ namespace CIS5680VRGame.Gameplay
                 return true;
 
             return m_FloorTilesRoot != null && collider.transform.IsChildOf(m_FloorTilesRoot);
+        }
+
+        bool ShouldExcludeColliderFromRenderSkin(BoxCollider collider)
+        {
+            if (collider == null || m_ExcludedColliderNameContains == null || m_ExcludedColliderNameContains.Length == 0)
+                return false;
+
+            Transform current = collider.transform;
+            while (current != null)
+            {
+                string currentName = current.name;
+                for (int i = 0; i < m_ExcludedColliderNameContains.Length; i++)
+                {
+                    string token = m_ExcludedColliderNameContains[i];
+                    if (!string.IsNullOrWhiteSpace(token)
+                        && currentName.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return true;
+                    }
+                }
+
+                if (current == m_MazeRoot)
+                    break;
+
+                current = current.parent;
+            }
+
+            return false;
         }
 
         void AppendWallPatches(List<BoxCollider> wallColliders, List<FaceRecord> faceRecords)

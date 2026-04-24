@@ -12,6 +12,12 @@ namespace CIS5680VRGame.Gameplay
         static float s_GlobalDetectionRangeReductionMeters;
         static float s_GlobalFieldOfViewReductionDegrees;
         static float s_GlobalDetectionSuppressedUntil = float.NegativeInfinity;
+        static readonly Vector3 s_DefaultBodyColliderCenter = new(0f, 0.783f, 0f);
+        const float DefaultBodyColliderRadius = 0.48f;
+        const string BodyBlockerName = "BodyBlocker";
+        const string PulseAttachSurfaceName = "PulseAttachSurface";
+        const float DefaultPulseAttachSurfaceRadius = 0.42f;
+        const int MaxPulseAttachMeshTrianglesForConvexCollider = 240;
 
         enum EnemyState
         {
@@ -119,6 +125,19 @@ namespace CIS5680VRGame.Gameplay
         bool CanUseGridNavigation => m_GridNavigator != null && m_GridNavigator.HasActiveLayout;
         bool CanUseNavigationGraph => m_NavigationGraph != null && m_NavigationGraph.NodeCount > 0;
 
+        public static bool TryGetPulseAttachSurfaceOwner(Collider collider, out EnemyPatrolController owner)
+        {
+            owner = null;
+            if (collider == null)
+                return false;
+
+            if (!string.Equals(collider.transform.name, PulseAttachSurfaceName, System.StringComparison.Ordinal))
+                return false;
+
+            owner = collider.GetComponentInParent<EnemyPatrolController>();
+            return owner != null;
+        }
+
         public static bool HasAlertedEnemy()
         {
             foreach (EnemyPatrolController controller in s_ActiveControllers)
@@ -186,7 +205,7 @@ namespace CIS5680VRGame.Gameplay
 
         void OnValidate()
         {
-            ResolveReferences();
+            ResolveReferences(ensureGeneratedColliders: false);
             if (m_Rigidbody == null)
                 m_Rigidbody = GetComponent<Rigidbody>();
 
@@ -267,12 +286,55 @@ namespace CIS5680VRGame.Gameplay
             m_RoamCenter = worldPosition;
         }
 
+        public void FaceToward(Vector3 worldPosition)
+        {
+            Vector3 lookDirection = Vector3.ProjectOnPlane(worldPosition - transform.position, Vector3.up);
+            if (lookDirection.sqrMagnitude < 0.0001f)
+                return;
+
+            lookDirection.Normalize();
+            Quaternion targetRotation = Quaternion.LookRotation(lookDirection, Vector3.up);
+            transform.rotation = targetRotation;
+            m_CurrentMoveDirection = lookDirection;
+
+            if (m_Rigidbody == null)
+                m_Rigidbody = GetComponent<Rigidbody>();
+
+            if (m_Rigidbody != null)
+            {
+                m_Rigidbody.rotation = targetRotation;
+                m_Rigidbody.velocity = Vector3.zero;
+                m_Rigidbody.angularVelocity = Vector3.zero;
+            }
+        }
+
+        public void ForceChaseTarget(Vector3 worldPosition)
+        {
+            ResolvePlayerReferences();
+            FaceToward(worldPosition);
+
+            if (m_Rigidbody == null)
+                m_Rigidbody = GetComponent<Rigidbody>();
+
+            if (m_Rigidbody != null)
+                m_SpawnPosition = m_Rigidbody.position;
+            else
+                m_SpawnPosition = transform.position;
+
+            Vector3 targetGroundPosition = GetGroundPosition(worldPosition);
+            m_State = EnemyState.Chase;
+            m_LastKnownPlayerPosition = targetGroundPosition;
+            m_LastSeenPlayerAt = Time.time;
+            ResetSearchState();
+            ClearGridNavigationState(keepPatrolTarget: false);
+        }
+
         public void SetPatrolRadius(float radius)
         {
             m_PatrolRadius = Mathf.Max(0.5f, radius);
         }
 
-        void ResolveReferences()
+        void ResolveReferences(bool ensureGeneratedColliders = true)
         {
             if (m_VisualRoot == null)
             {
@@ -294,14 +356,219 @@ namespace CIS5680VRGame.Gameplay
             if (m_Rigidbody == null)
                 m_Rigidbody = GetComponent<Rigidbody>();
 
-            if (m_SelfColliders == null || m_SelfColliders.Length == 0)
-                m_SelfColliders = GetComponents<Collider>();
+            if (ensureGeneratedColliders)
+            {
+                EnsurePulseAttachSurface();
+                EnsureSolidBodyCollider();
+            }
+
+            m_SelfColliders = GetComponentsInChildren<Collider>(true);
 
             if (m_GridNavigator == null)
                 m_GridNavigator = FindObjectOfType<MazeGridNavigator>();
 
             if (m_NavigationGraph == null)
                 m_NavigationGraph = FindObjectOfType<MazeNavigationGraph>();
+        }
+
+        void EnsureSolidBodyCollider()
+        {
+            Collider[] colliders = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider collider = colliders[i];
+                if (collider != null && collider.enabled && !collider.isTrigger)
+                    return;
+            }
+
+            Transform bodyBlocker = transform.Find(BodyBlockerName);
+            if (bodyBlocker == null)
+            {
+                var bodyObject = new GameObject(BodyBlockerName);
+                bodyBlocker = bodyObject.transform;
+                bodyBlocker.SetParent(transform, false);
+            }
+
+            SphereCollider bodyCollider = bodyBlocker.GetComponent<SphereCollider>();
+            if (bodyCollider == null)
+                bodyCollider = bodyBlocker.gameObject.AddComponent<SphereCollider>();
+
+            bodyCollider.isTrigger = false;
+            bodyCollider.radius = DefaultBodyColliderRadius;
+            bodyCollider.center = s_DefaultBodyColliderCenter;
+        }
+
+        void EnsurePulseAttachSurface()
+        {
+            Transform attachParent = m_VisualRoot != null ? m_VisualRoot : transform;
+            Transform attachSurface = attachParent.Find(PulseAttachSurfaceName);
+            bool createdAttachSurface = false;
+            if (attachSurface == null)
+            {
+                var attachObject = new GameObject(PulseAttachSurfaceName);
+                attachSurface = attachObject.transform;
+                attachSurface.SetParent(attachParent, false);
+                createdAttachSurface = true;
+            }
+
+            if (createdAttachSurface)
+            {
+                attachSurface.localPosition = Vector3.zero;
+                attachSurface.localRotation = Quaternion.identity;
+                attachSurface.localScale = Vector3.one;
+            }
+
+            MeshFilter sourceMeshFilter = ResolvePulseAttachSourceMeshFilter();
+            Mesh sourceMesh = sourceMeshFilter != null ? sourceMeshFilter.sharedMesh : null;
+            if (sourceMesh != null)
+            {
+                AlignPulseAttachSurfaceToSourceMesh(attachSurface, sourceMeshFilter.transform);
+
+                if (CanUsePulseAttachMeshCollider(sourceMesh))
+                {
+                    RemovePulseAttachFallbackCollider(attachSurface);
+
+                    MeshCollider meshCollider = attachSurface.GetComponent<MeshCollider>();
+                    if (meshCollider == null)
+                        meshCollider = attachSurface.gameObject.AddComponent<MeshCollider>();
+
+                    meshCollider.sharedMesh = sourceMesh;
+                    meshCollider.convex = true;
+                    meshCollider.isTrigger = true;
+                    return;
+                }
+
+                RemovePulseAttachMeshCollider(attachSurface);
+            }
+
+            MeshCollider existingMeshCollider = attachSurface.GetComponent<MeshCollider>();
+            if (existingMeshCollider != null)
+                existingMeshCollider.isTrigger = true;
+
+            SphereCollider surfaceCollider = attachSurface.GetComponent<SphereCollider>();
+            if (surfaceCollider == null)
+            {
+                surfaceCollider = attachSurface.gameObject.AddComponent<SphereCollider>();
+                surfaceCollider.radius = DefaultPulseAttachSurfaceRadius;
+                surfaceCollider.center = Vector3.zero;
+            }
+
+            surfaceCollider.isTrigger = true;
+        }
+
+        bool CanUsePulseAttachMeshCollider(Mesh mesh)
+        {
+            if (mesh == null)
+                return false;
+
+            int triangleCount = mesh.triangles != null ? mesh.triangles.Length / 3 : 0;
+            return triangleCount > 0 && triangleCount <= MaxPulseAttachMeshTrianglesForConvexCollider;
+        }
+
+        MeshFilter ResolvePulseAttachSourceMeshFilter()
+        {
+            if (m_VisualRoot == null)
+                return null;
+
+            MeshFilter[] meshFilters = m_VisualRoot.GetComponentsInChildren<MeshFilter>(true);
+            MeshFilter bestFilter = null;
+            float bestScore = float.NegativeInfinity;
+
+            for (int i = 0; i < meshFilters.Length; i++)
+            {
+                MeshFilter meshFilter = meshFilters[i];
+                if (meshFilter == null || meshFilter.sharedMesh == null)
+                    continue;
+
+                Transform meshTransform = meshFilter.transform;
+                if (string.Equals(meshTransform.name, PulseAttachSurfaceName, System.StringComparison.Ordinal))
+                    continue;
+
+                if (m_SensorOrigin != null && (meshTransform == m_SensorOrigin || meshTransform.IsChildOf(m_SensorOrigin)))
+                    continue;
+
+                Renderer renderer = meshFilter.GetComponent<Renderer>();
+                Vector3 worldSize = renderer != null
+                    ? renderer.bounds.size
+                    : Vector3.Scale(meshFilter.sharedMesh.bounds.size, AbsVector(meshTransform.lossyScale));
+                float score = worldSize.x * worldSize.y * worldSize.z;
+                if (score <= bestScore)
+                    continue;
+
+                bestScore = score;
+                bestFilter = meshFilter;
+            }
+
+            return bestFilter;
+        }
+
+        void AlignPulseAttachSurfaceToSourceMesh(Transform attachSurface, Transform sourceTransform)
+        {
+            if (attachSurface == null || sourceTransform == null)
+                return;
+
+            attachSurface.position = sourceTransform.position;
+            attachSurface.rotation = sourceTransform.rotation;
+
+            Transform attachParent = attachSurface.parent;
+            if (attachParent == null)
+            {
+                attachSurface.localScale = sourceTransform.lossyScale;
+                return;
+            }
+
+            attachSurface.localScale = DivideScale(sourceTransform.lossyScale, attachParent.lossyScale);
+        }
+
+        void RemovePulseAttachFallbackCollider(Transform attachSurface)
+        {
+            if (attachSurface == null)
+                return;
+
+            SphereCollider sphereCollider = attachSurface.GetComponent<SphereCollider>();
+            if (sphereCollider == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(sphereCollider);
+            else
+                DestroyImmediate(sphereCollider);
+        }
+
+        void RemovePulseAttachMeshCollider(Transform attachSurface)
+        {
+            if (attachSurface == null)
+                return;
+
+            MeshCollider meshCollider = attachSurface.GetComponent<MeshCollider>();
+            if (meshCollider == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(meshCollider);
+            else
+                DestroyImmediate(meshCollider);
+        }
+
+        static Vector3 AbsVector(Vector3 value)
+        {
+            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
+        }
+
+        static Vector3 DivideScale(Vector3 numerator, Vector3 denominator)
+        {
+            return new Vector3(
+                SafeDivideScaleComponent(numerator.x, denominator.x),
+                SafeDivideScaleComponent(numerator.y, denominator.y),
+                SafeDivideScaleComponent(numerator.z, denominator.z));
+        }
+
+        static float SafeDivideScaleComponent(float numerator, float denominator)
+        {
+            if (Mathf.Abs(denominator) < 0.0001f)
+                return numerator;
+
+            return numerator / denominator;
         }
 
         void ConfigureRigidbody()

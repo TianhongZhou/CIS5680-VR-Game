@@ -38,5 +38,19 @@ namespace CIS5680VRGame.UI
             transform.position = m_Head.position + flatForward * m_Distance + flatRight * m_RightOffset + Vector3.up * m_HeightOffset;
             transform.rotation = Quaternion.LookRotation(flatForward, Vector3.up);
         }
+
+        public void ApplyOffsets(float distance, float heightOffset, float rightOffset)
+        {
+            m_Distance = Mathf.Max(0f, distance);
+            m_HeightOffset = heightOffset;
+            m_RightOffset = rightOffset;
+            SnapToTarget();
+        }
+
+        public void ApplyRightOffset(float rightOffset)
+        {
+            m_RightOffset = rightOffset;
+            SnapToTarget();
+        }
     }
 }

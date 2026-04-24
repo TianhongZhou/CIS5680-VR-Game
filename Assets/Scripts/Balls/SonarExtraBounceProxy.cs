@@ -9,6 +9,18 @@ namespace CIS5680VRGame.Balls
     {
         const float MinimumLifetimeSeconds = 0.2f;
         const float DefaultLifetimeSeconds = 5f;
+        const float PostPulseLingerSeconds = 0.2f;
+        const float PostPulseFadeSeconds = 0.55f;
+        const float WallBounceVelocityScale = 0.55f;
+        const float FloorBounceVelocityScale = 0.32f;
+        const float MinWallSurfaceExitSpeed = 1.35f;
+        const float MinFloorSurfaceExitSpeed = 0.25f;
+        const float MinWallUpSpeed = 1.45f;
+        const float MinFloorUpSpeed = 3.05f;
+        const float MaxWallUpSpeed = 3.25f;
+        const float MaxFloorUpSpeed = 4.35f;
+        const float MaxWallHorizontalSpeed = 2.75f;
+        const float MaxFloorHorizontalSpeed = 2.25f;
 
         PulseManager m_PulseManager;
         float m_PulseRadius;
@@ -18,7 +30,9 @@ namespace CIS5680VRGame.Balls
         float m_SpawnTime;
         bool m_Consumed;
 
-        public static void SpawnFromImpact(
+        public bool IsWaitingForExtraBounce => !m_Consumed;
+
+        public static void BeginFromImpact(
             in BallImpactContext context,
             PulseManager pulseManager,
             float pulseRadius,
@@ -30,53 +44,17 @@ namespace CIS5680VRGame.Balls
                 return;
 
             GameObject sourceBall = context.BallObject;
-            MeshFilter sourceMeshFilter = sourceBall.GetComponent<MeshFilter>();
-            MeshRenderer sourceMeshRenderer = sourceBall.GetComponent<MeshRenderer>();
-            SphereCollider sourceSphereCollider = sourceBall.GetComponent<SphereCollider>();
             Rigidbody sourceRigidBody = sourceBall.GetComponent<Rigidbody>();
 
-            GameObject proxy = new($"{sourceBall.name}_ExtraBounce");
-            proxy.layer = sourceBall.layer;
-            proxy.transform.position = CalculateSpawnPosition(context, sourceSphereCollider, sourceBall.transform.lossyScale);
-            proxy.transform.rotation = sourceBall.transform.rotation;
-            proxy.transform.localScale = sourceBall.transform.lossyScale;
+            if (sourceRigidBody == null)
+                return;
 
-            if (sourceMeshFilter != null)
-            {
-                MeshFilter meshFilter = proxy.AddComponent<MeshFilter>();
-                meshFilter.sharedMesh = sourceMeshFilter.sharedMesh;
-            }
+            sourceRigidBody.velocity = CalculateBounceVelocity(context, sourceRigidBody);
 
-            if (sourceMeshRenderer != null)
-            {
-                MeshRenderer meshRenderer = proxy.AddComponent<MeshRenderer>();
-                meshRenderer.sharedMaterials = sourceMeshRenderer.sharedMaterials;
-                meshRenderer.shadowCastingMode = sourceMeshRenderer.shadowCastingMode;
-                meshRenderer.receiveShadows = sourceMeshRenderer.receiveShadows;
-            }
+            SonarExtraBounceProxy bounceProxy = sourceBall.GetComponent<SonarExtraBounceProxy>();
+            if (bounceProxy == null)
+                bounceProxy = sourceBall.AddComponent<SonarExtraBounceProxy>();
 
-            SphereCollider proxyCollider = proxy.AddComponent<SphereCollider>();
-            if (sourceSphereCollider != null)
-            {
-                proxyCollider.radius = sourceSphereCollider.radius;
-                proxyCollider.center = sourceSphereCollider.center;
-                proxyCollider.material = sourceSphereCollider.material;
-            }
-
-            Rigidbody rigidbody = proxy.AddComponent<Rigidbody>();
-            if (sourceRigidBody != null)
-            {
-                rigidbody.mass = sourceRigidBody.mass;
-                rigidbody.angularDrag = sourceRigidBody.angularDrag;
-                rigidbody.drag = sourceRigidBody.drag;
-                rigidbody.useGravity = sourceRigidBody.useGravity;
-                rigidbody.interpolation = sourceRigidBody.interpolation;
-                rigidbody.collisionDetectionMode = sourceRigidBody.collisionDetectionMode;
-            }
-
-            rigidbody.velocity = CalculateBounceVelocity(context, sourceRigidBody);
-
-            SonarExtraBounceProxy bounceProxy = proxy.AddComponent<SonarExtraBounceProxy>();
             bounceProxy.Initialize(pulseManager, pulseRadius, validGroundLayers, minGroundUpDot, requireGroundContact);
         }
 
@@ -93,23 +71,23 @@ namespace CIS5680VRGame.Balls
             m_MinGroundUpDot = minGroundUpDot;
             m_RequireGroundContact = requireGroundContact;
             m_SpawnTime = Time.time;
+            m_Consumed = false;
         }
 
         void Update()
         {
-            if (Time.time - m_SpawnTime > DefaultLifetimeSeconds)
+            if (!m_Consumed && Time.time - m_SpawnTime > DefaultLifetimeSeconds)
                 Destroy(gameObject);
         }
 
         void OnCollisionEnter(Collision collision)
         {
-            if (m_Consumed)
+            if (!CanConsumeImpact())
                 return;
 
-            if (Time.time - m_SpawnTime < MinimumLifetimeSeconds)
-                return;
-
-            if (((1 << collision.gameObject.layer) & m_ValidGroundLayers.value) == 0)
+            bool allowSpecialLandingSurface = ThrowableBall.IsSpecialLandingSurface(collision.collider);
+            bool validGroundImpact = ((1 << collision.collider.gameObject.layer) & m_ValidGroundLayers.value) != 0;
+            if (!allowSpecialLandingSurface && !validGroundImpact)
                 return;
 
             if (collision.contactCount <= 0)
@@ -119,43 +97,110 @@ namespace CIS5680VRGame.Balls
             if (m_RequireGroundContact && Vector3.Dot(contact.normal, Vector3.up) < m_MinGroundUpDot)
                 return;
 
+            ConsumeImpact(contact.point, contact.normal, collision.collider);
+        }
+
+        void OnTriggerEnter(Collider other)
+        {
+            TryConsumeTriggerImpact(other);
+        }
+
+        void OnTriggerStay(Collider other)
+        {
+            TryConsumeTriggerImpact(other);
+        }
+
+        bool TryConsumeTriggerImpact(Collider other)
+        {
+            if (!CanConsumeImpact() || !BallLandingSurface.TryGet(other, out BallLandingSurface landingSurface))
+                return false;
+
+            Vector3 hitPoint = landingSurface.ResolveHitPoint(transform.position);
+            ConsumeImpact(hitPoint, landingSurface.SurfaceNormal, other);
+            return true;
+        }
+
+        bool CanConsumeImpact()
+        {
+            if (m_Consumed)
+                return false;
+
+            return Time.time - m_SpawnTime >= MinimumLifetimeSeconds;
+        }
+
+        void ConsumeImpact(Vector3 hitPoint, Vector3 hitNormal, Collider hitCollider)
+        {
             m_Consumed = true;
 
             if (m_PulseManager != null)
-                m_PulseManager.SpawnPulse(contact.point, contact.normal, m_PulseRadius, collision.collider);
+                m_PulseManager.SpawnPulse(hitPoint, hitNormal, m_PulseRadius, hitCollider);
 
-            PulseAudioService.PlayPulse(contact.point);
-            Destroy(gameObject);
-        }
-
-        static Vector3 CalculateSpawnPosition(in BallImpactContext context, SphereCollider sourceSphereCollider, Vector3 lossyScale)
-        {
-            float colliderRadius = sourceSphereCollider != null ? sourceSphereCollider.radius : 0.05f;
-            float worldRadius = colliderRadius * Mathf.Max(lossyScale.x, Mathf.Max(lossyScale.y, lossyScale.z));
-            float offset = Mathf.Max(0.05f, worldRadius * 1.25f);
-            Vector3 surfaceNormal = context.HitNormal.sqrMagnitude > 0.0001f ? context.HitNormal.normalized : Vector3.up;
-            return context.HitPoint + surfaceNormal * offset;
+            PulseAudioService.PlayPulse(hitPoint);
+            BallFadeOut.Begin(gameObject, PostPulseLingerSeconds, PostPulseFadeSeconds);
         }
 
         static Vector3 CalculateBounceVelocity(in BallImpactContext context, Rigidbody sourceRigidBody)
         {
-            Vector3 incomingVelocity = context.Collision.relativeVelocity;
-            if (incomingVelocity.sqrMagnitude < 0.0001f && sourceRigidBody != null)
-                incomingVelocity = sourceRigidBody.velocity;
+            Vector3 surfaceNormal = context.HitNormal.sqrMagnitude > 0.0001f ? context.HitNormal.normalized : Vector3.up;
+            float floorFactor = Mathf.Clamp01(surfaceNormal.y);
+            Vector3 outgoingVelocity = ResolveOutgoingVelocity(context, sourceRigidBody, surfaceNormal);
 
+            float velocityScale = Mathf.Lerp(WallBounceVelocityScale, FloorBounceVelocityScale, floorFactor);
+            Vector3 bounceVelocity = outgoingVelocity * velocityScale;
+
+            float minimumSurfaceExitSpeed = Mathf.Lerp(MinWallSurfaceExitSpeed, MinFloorSurfaceExitSpeed, floorFactor);
+            float surfaceExitSpeed = Vector3.Dot(bounceVelocity, surfaceNormal);
+            if (surfaceExitSpeed < minimumSurfaceExitSpeed)
+                bounceVelocity += surfaceNormal * (minimumSurfaceExitSpeed - surfaceExitSpeed);
+
+            float minimumUpSpeed = Mathf.Lerp(MinWallUpSpeed, MinFloorUpSpeed, floorFactor);
+            float maximumUpSpeed = Mathf.Lerp(MaxWallUpSpeed, MaxFloorUpSpeed, floorFactor);
+            bounceVelocity.y = Mathf.Clamp(bounceVelocity.y, minimumUpSpeed, maximumUpSpeed);
+
+            Vector3 horizontalVelocity = Vector3.ProjectOnPlane(bounceVelocity, Vector3.up);
+            float maximumHorizontalSpeed = Mathf.Lerp(MaxWallHorizontalSpeed, MaxFloorHorizontalSpeed, floorFactor);
+            if (horizontalVelocity.sqrMagnitude > maximumHorizontalSpeed * maximumHorizontalSpeed)
+                bounceVelocity = horizontalVelocity.normalized * maximumHorizontalSpeed + Vector3.up * bounceVelocity.y;
+
+            return bounceVelocity;
+        }
+
+        static Vector3 ResolveOutgoingVelocity(in BallImpactContext context, Rigidbody sourceRigidBody, Vector3 surfaceNormal)
+        {
+            Vector3 rigidbodyVelocity = sourceRigidBody != null ? sourceRigidBody.velocity : Vector3.zero;
+            Vector3 relativeVelocity = context.Collision != null ? context.Collision.relativeVelocity : Vector3.zero;
+
+            Vector3 incomingVelocity = ChooseIncomingVelocity(rigidbodyVelocity, relativeVelocity, surfaceNormal);
             if (incomingVelocity.sqrMagnitude < 0.0001f)
                 incomingVelocity = Vector3.down * 4f;
 
-            Vector3 surfaceNormal = context.HitNormal.sqrMagnitude > 0.0001f ? context.HitNormal.normalized : Vector3.up;
-            Vector3 reflectedVelocity = Vector3.Reflect(incomingVelocity, surfaceNormal);
-            Vector3 horizontalVelocity = Vector3.ProjectOnPlane(reflectedVelocity, Vector3.up) * 0.35f;
-            float upwardSpeed = Mathf.Max(3.25f, Mathf.Abs(Vector3.Dot(incomingVelocity, surfaceNormal)) * 0.65f);
-            Vector3 bounceVelocity = horizontalVelocity + Vector3.up * upwardSpeed;
+            return Vector3.Dot(incomingVelocity, surfaceNormal) < 0f
+                ? Vector3.Reflect(incomingVelocity, surfaceNormal)
+                : incomingVelocity;
+        }
 
-            if (bounceVelocity.sqrMagnitude < 0.0001f)
-                bounceVelocity = Vector3.up * 3.25f;
+        static Vector3 ChooseIncomingVelocity(Vector3 rigidbodyVelocity, Vector3 relativeVelocity, Vector3 surfaceNormal)
+        {
+            Vector3 orientedRelativeVelocity = OrientIntoSurface(relativeVelocity, surfaceNormal);
+            bool rigidbodyIsMovingIntoSurface = Vector3.Dot(rigidbodyVelocity, surfaceNormal) <= 0f;
 
-            return bounceVelocity;
+            if (rigidbodyVelocity.sqrMagnitude < 0.0001f)
+                return orientedRelativeVelocity;
+
+            if (rigidbodyIsMovingIntoSurface)
+                return rigidbodyVelocity;
+
+            return orientedRelativeVelocity.sqrMagnitude > rigidbodyVelocity.sqrMagnitude
+                ? orientedRelativeVelocity
+                : rigidbodyVelocity;
+        }
+
+        static Vector3 OrientIntoSurface(Vector3 velocity, Vector3 surfaceNormal)
+        {
+            if (velocity.sqrMagnitude < 0.0001f)
+                return velocity;
+
+            return Vector3.Dot(velocity, surfaceNormal) <= 0f ? velocity : -velocity;
         }
     }
 }

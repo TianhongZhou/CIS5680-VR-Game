@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using CIS5680VRGame.Progression;
 using UnityEngine;
@@ -8,12 +9,15 @@ namespace CIS5680VRGame.Balls
 {
     public class StickyPulseImpactEffect : BallImpactEffect
     {
+        public static event Action<Vector3, float, Collider> PulseSpawned;
+
         [SerializeField] PulseManager m_PulseManager;
         [SerializeField] float m_PulseRadius = 15f;
         [SerializeField] float m_PulseInterval = 8f;
         [SerializeField] int m_PulseCount = 3;
         [SerializeField] float m_StickSurfaceOffset = 0.02f;
         [SerializeField] float m_DestroyDelayAfterLastPulse = 0.75f;
+        [SerializeField] float m_FadeDurationAfterLastPulse = 0.55f;
         float m_BasePulseRadius;
         int m_PersistentPulseRadiusBonusPercent;
         int m_SingleRunPulseRadiusBonusPercent;
@@ -26,6 +30,9 @@ namespace CIS5680VRGame.Balls
         Coroutine m_PulseRoutine;
         bool m_HasStuck;
         Collider m_StuckSurfaceCollider;
+        Transform m_StuckAnchorTransform;
+        Vector3 m_StuckLocalPosition;
+        Quaternion m_StuckLocalRotation = Quaternion.identity;
 
         void Awake()
         {
@@ -50,6 +57,16 @@ namespace CIS5680VRGame.Balls
             }
         }
 
+        void LateUpdate()
+        {
+            if (!m_HasStuck || m_StuckAnchorTransform == null)
+                return;
+
+            transform.SetPositionAndRotation(
+                m_StuckAnchorTransform.TransformPoint(m_StuckLocalPosition),
+                m_StuckAnchorTransform.rotation * m_StuckLocalRotation);
+        }
+
         public override void Apply(in BallImpactContext context)
         {
             if (m_HasStuck)
@@ -59,7 +76,7 @@ namespace CIS5680VRGame.Balls
                 m_PulseManager = FindObjectOfType<PulseManager>();
 
             m_HasStuck = true;
-            m_StuckSurfaceCollider = context.Collision.collider;
+            m_StuckSurfaceCollider = context.HitCollider;
             StickToSurface(context);
             m_PulseRoutine = StartCoroutine(EmitPulses());
         }
@@ -73,9 +90,18 @@ namespace CIS5680VRGame.Balls
             transform.up = surfaceNormal;
             transform.position = context.HitPoint + surfaceNormal * m_StickSurfaceOffset;
 
-            Transform parent = context.Collision.collider != null ? context.Collision.collider.transform : context.Collision.transform;
-            if (parent != null)
-                transform.SetParent(parent, true);
+            m_StuckAnchorTransform = context.HitCollider != null ? context.HitCollider.transform : null;
+            if (m_StuckAnchorTransform != null)
+            {
+                m_StuckLocalPosition = m_StuckAnchorTransform.InverseTransformPoint(transform.position);
+                m_StuckLocalRotation = Quaternion.Inverse(m_StuckAnchorTransform.rotation) * transform.rotation;
+                transform.SetParent(null, true);
+            }
+            else
+            {
+                m_StuckLocalPosition = transform.position;
+                m_StuckLocalRotation = transform.rotation;
+            }
 
             if (m_Rigidbody != null)
             {
@@ -121,7 +147,7 @@ namespace CIS5680VRGame.Balls
             if (m_DestroyDelayAfterLastPulse > 0f)
                 yield return new WaitForSeconds(m_DestroyDelayAfterLastPulse);
 
-            Destroy(gameObject);
+            BallFadeOut.Begin(gameObject, 0f, m_FadeDurationAfterLastPulse);
         }
 
         void SpawnPulseFromCurrentAnchor()
@@ -136,6 +162,7 @@ namespace CIS5680VRGame.Balls
             Vector3 pulseOrigin = transform.position - surfaceNormal * m_StickSurfaceOffset;
             m_PulseManager.SpawnPulse(pulseOrigin, surfaceNormal, m_PulseRadius, m_StuckSurfaceCollider);
             PulseAudioService.PlayPulse(pulseOrigin);
+            PulseSpawned?.Invoke(pulseOrigin, m_PulseRadius, m_StuckSurfaceCollider);
         }
 
         public void ApplyPersistentPulseRadiusBonusPercent(int bonusPercent)

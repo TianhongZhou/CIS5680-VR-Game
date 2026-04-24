@@ -39,17 +39,17 @@ namespace CIS5680VRGame.Balls
             if (m_PulseManager == null)
                 return;
 
-            m_PulseManager.SpawnPulse(context.HitPoint, context.HitNormal, m_PulseRadius, context.Collision.collider);
+            m_PulseManager.SpawnPulse(context.HitPoint, context.HitNormal, m_PulseRadius, context.HitCollider);
             PulseAudioService.PlayPulse(context.HitPoint);
-            PulseSpawned?.Invoke(context.HitPoint, m_PulseRadius, context.Collision.collider);
+            PulseSpawned?.Invoke(context.HitPoint, m_PulseRadius, context.HitCollider);
 
-            if (ShouldSpawnExtraBounce(context))
+            if (context.Collision != null && ShouldSpawnExtraBounce(context))
             {
                 ThrowableBall throwableBall = context.BallObject != null ? context.BallObject.GetComponent<ThrowableBall>() : null;
                 if (throwableBall != null)
                 {
                     float extraBounceRadius = m_PulseRadius * Mathf.Clamp01(m_ExtraBouncePulseRadiusPercent / m_MaxExtraBounceRadiusPercent);
-                    SonarExtraBounceProxy.SpawnFromImpact(
+                    SonarExtraBounceProxy.BeginFromImpact(
                         context,
                         m_PulseManager,
                         extraBounceRadius,
@@ -82,8 +82,7 @@ namespace CIS5680VRGame.Balls
             if (m_ExtraBouncePulseRadiusPercent <= 0)
                 return false;
 
-            Vector3 hitNormal = context.HitNormal.sqrMagnitude > 0.0001f ? context.HitNormal.normalized : Vector3.up;
-            return Vector3.Dot(hitNormal, Vector3.up) >= 0.5f;
+            return context.HitNormal.sqrMagnitude > 0.0001f;
         }
 
         static int ResolveProfilePulseRadiusBonusPercent()

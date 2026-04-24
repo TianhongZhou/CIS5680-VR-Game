@@ -3,6 +3,7 @@ using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using CIS5680VRGame.Progression;
 using CIS5680VRGame.UI;
 
 namespace CIS5680VRGame.Gameplay
@@ -10,15 +11,19 @@ namespace CIS5680VRGame.Gameplay
     [RequireComponent(typeof(Collider))]
     public class TutorialCompletionGoal : MonoBehaviour
     {
+        const string ShopSceneName = "ShopScene";
+
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] MovementModeManager m_MovementModeManager;
         [SerializeField] Renderer[] m_TargetRenderers;
         [SerializeField] string m_TutorialSceneName = "TutorialLevel";
-        [SerializeField] string m_GameplaySceneName = "Maze1";
+        [SerializeField] string m_ShopTutorialSceneName = ShopSceneName;
+        [SerializeField] int m_ShopTutorialGoldGrant = 20;
         [SerializeField] Color m_CompletedColor = new(0.34f, 0.96f, 1f, 1f);
         [SerializeField] Color m_CompletedEmissionColor = new(0.18f, 0.72f, 1f, 1f);
         [SerializeField] Vector2 m_MenuSize = new(960f, 560f);
         [SerializeField] Vector2 m_ButtonSize = new(300f, 84f);
+        [SerializeField] Vector3 m_MenuWorldOffset = new(0f, -0.36f, 2f);
 
         static readonly int s_BaseColorId = Shader.PropertyToID("_BaseColor");
         static readonly int s_ColorId = Shader.PropertyToID("_Color");
@@ -98,6 +103,8 @@ namespace CIS5680VRGame.Gameplay
         {
             if (m_MenuRoot != null)
             {
+                Camera existingMenuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
+                ModalMenuPauseUtility.RefreshWorldMenuPose(m_MenuRoot, existingMenuCamera, m_MenuWorldOffset);
                 m_MenuRoot.SetActive(true);
                 return;
             }
@@ -107,12 +114,13 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             RectTransform panelRect;
-            m_MenuRoot = ModalMenuPauseUtility.CreateScreenSpaceMenuRoot(
+            m_MenuRoot = ModalMenuPauseUtility.CreateWorldSpaceMenuRoot(
                 "TutorialCompleteMenu",
                 menuCamera,
                 m_MenuSize,
                 new Color(0f, 0f, 0f, 0.42f),
-                out panelRect);
+                out panelRect,
+                m_MenuWorldOffset);
 
             GameObject panel = panelRect.gameObject;
             Image panelImage = panel.AddComponent<Image>();
@@ -146,7 +154,7 @@ namespace CIS5680VRGame.Gameplay
             CreateLabel(
                 "Message",
                 panel.transform,
-                "You are ready for the maze. \n Start the full game or replay the tutorial.",
+                "You can collect coins in the maze and spend them in the shop.\nContinue to the shop tutorial or replay this tutorial.",
                 fontAsset,
                 28f,
                 FontStyles.Normal,
@@ -169,7 +177,7 @@ namespace CIS5680VRGame.Gameplay
             CreateButton(
                 "StartGameButton",
                 buttonRow.transform,
-                "Start Game",
+                "Shop Tutorial",
                 fontAsset,
                 new Color(0.12f, 0.68f, 0.98f, 0.96f),
                 StartGame,
@@ -208,6 +216,10 @@ namespace CIS5680VRGame.Gameplay
             label.fontStyle = fontStyle;
             label.color = color;
             label.alignment = TextAlignmentOptions.Center;
+            label.enableWordWrapping = true;
+            label.enableAutoSizing = true;
+            label.fontSizeMax = fontSize;
+            label.fontSizeMin = Mathf.Max(18f, fontSize * 0.65f);
         }
 
         void CreateButton(
@@ -257,6 +269,9 @@ namespace CIS5680VRGame.Gameplay
             buttonLabel.color = Color.white;
             buttonLabel.alignment = TextAlignmentOptions.Center;
             buttonLabel.enableWordWrapping = false;
+            buttonLabel.enableAutoSizing = true;
+            buttonLabel.fontSizeMax = 28f;
+            buttonLabel.fontSizeMin = 18f;
         }
 
         void RestartTutorial()
@@ -268,7 +283,10 @@ namespace CIS5680VRGame.Gameplay
         void StartGame()
         {
             ModalMenuPauseUtility.ResumeGameplayAfterMenu();
-            SceneTransitionService.LoadScene(m_GameplaySceneName);
+            ProfileService.BeginShopTutorialOnSceneLoad(m_ShopTutorialGoldGrant);
+            SceneTransitionService.LoadScene(string.IsNullOrWhiteSpace(m_ShopTutorialSceneName)
+                ? ShopSceneName
+                : m_ShopTutorialSceneName);
         }
     }
 }

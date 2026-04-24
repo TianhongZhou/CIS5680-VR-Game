@@ -17,6 +17,12 @@ namespace CIS5680VRGame.Gameplay
 {
     static class ModalMenuPauseUtility
     {
+        public static readonly Vector2 ScreenMenuReferenceResolution = new(1600f, 900f);
+        public static readonly Vector3 WorldMenuLocalOffset = new(0f, -0.36f, 2f);
+        public const float WorldMenuUnitsPerPixel = 0.0022f;
+        const float k_MinWorldMenuDistance = 1.65f;
+        const float k_HighestComfortableWorldMenuY = -0.28f;
+
         static bool s_IsPausedForMenu;
         static readonly List<Behaviour> s_DisabledBehaviours = new();
         static MovementModeManager s_LockedMovementModeManager;
@@ -104,35 +110,39 @@ namespace CIS5680VRGame.Gameplay
             return loadedFonts.Length > 0 ? loadedFonts[0] : null;
         }
 
-        public static GameObject CreateScreenSpaceMenuRoot(
+        public static GameObject CreateWorldSpaceMenuRoot(
             string rootName,
             Camera menuCamera,
             Vector2 panelSize,
             Color backdropColor,
-            out RectTransform panelRect)
+            out RectTransform panelRect,
+            Vector3? localOffset = null)
         {
-            GameObject root = new(rootName);
+            GameObject root = new(rootName, typeof(RectTransform));
 
             Canvas canvas = root.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = menuCamera;
-            canvas.planeDistance = menuCamera != null
-                ? Mathf.Max(menuCamera.nearClipPlane + 0.2f, 0.35f)
-                : 0.5f;
             canvas.sortingOrder = 5000;
 
             CanvasScaler scaler = root.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1600f, 900f);
-            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-            scaler.matchWidthOrHeight = 0.5f;
+            ConfigureWorldSpaceCanvasScaler(scaler);
 
             root.AddComponent<GraphicRaycaster>();
             TryAddTrackedDeviceGraphicRaycaster(root);
 
+            RectTransform rootRect = root.GetComponent<RectTransform>();
+            rootRect.sizeDelta = ScreenMenuReferenceResolution;
+            rootRect.anchorMin = new Vector2(0.5f, 0.5f);
+            rootRect.anchorMax = new Vector2(0.5f, 0.5f);
+            rootRect.pivot = new Vector2(0.5f, 0.5f);
+
+            RefreshWorldMenuPose(root, menuCamera, localOffset);
+
             GameObject backdrop = CreateUIObject("Backdrop", root.transform);
             Image backdropImage = backdrop.AddComponent<Image>();
             backdropImage.color = backdropColor;
+            backdropImage.raycastTarget = false;
 
             RectTransform backdropRect = backdrop.GetComponent<RectTransform>();
             backdropRect.anchorMin = Vector2.zero;
@@ -145,10 +155,115 @@ namespace CIS5680VRGame.Gameplay
             panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.pivot = new Vector2(0.5f, 0.5f);
-            panelRect.sizeDelta = panelSize;
-            panelRect.anchoredPosition = new Vector2(0f, -80f);
+            ConfigureCenteredSafePanel(panelRect, panelSize);
 
             return root;
+        }
+
+        public static void ConfigureWorldSpaceMenuRoot(GameObject menuRoot, Camera menuCamera, Vector3? localOffset = null)
+        {
+            if (menuRoot == null)
+                return;
+
+            Canvas canvas = menuRoot.GetComponent<Canvas>();
+            if (canvas != null)
+            {
+                canvas.renderMode = RenderMode.WorldSpace;
+                canvas.worldCamera = menuCamera;
+            }
+
+            RectTransform rootRect = menuRoot.GetComponent<RectTransform>();
+            if (rootRect != null)
+            {
+                rootRect.sizeDelta = ScreenMenuReferenceResolution;
+                rootRect.anchorMin = new Vector2(0.5f, 0.5f);
+                rootRect.anchorMax = new Vector2(0.5f, 0.5f);
+                rootRect.pivot = new Vector2(0.5f, 0.5f);
+            }
+
+            CanvasScaler scaler = menuRoot.GetComponent<CanvasScaler>();
+            if (scaler != null)
+                ConfigureWorldSpaceCanvasScaler(scaler);
+
+            if (menuRoot.GetComponent<GraphicRaycaster>() == null)
+                menuRoot.AddComponent<GraphicRaycaster>();
+
+            TryAddTrackedDeviceGraphicRaycaster(menuRoot);
+            RefreshWorldMenuPose(menuRoot, menuCamera, localOffset);
+        }
+
+        public static void RefreshWorldMenuPose(GameObject menuRoot, Camera menuCamera, Vector3? localOffset = null)
+        {
+            if (menuRoot == null || menuCamera == null)
+                return;
+
+            menuRoot.transform.SetParent(menuCamera.transform, false);
+            menuRoot.transform.localPosition = ResolveWorldMenuOffset(localOffset ?? WorldMenuLocalOffset);
+            menuRoot.transform.localRotation = Quaternion.identity;
+            menuRoot.transform.localScale = Vector3.one * WorldMenuUnitsPerPixel;
+        }
+
+        public static void ConfigureWorldSpaceCanvasScaler(CanvasScaler scaler)
+        {
+            if (scaler == null)
+                return;
+
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+            scaler.scaleFactor = 1f;
+            scaler.referencePixelsPerUnit = 100f;
+            scaler.dynamicPixelsPerUnit = 20f;
+        }
+
+        public static void ConfigureScreenSpaceCanvasScaler(CanvasScaler scaler)
+        {
+            if (scaler == null)
+                return;
+
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = ScreenMenuReferenceResolution;
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+        }
+
+        public static void ConfigureCenteredSafePanel(RectTransform panelRect, Vector2 preferredSize)
+        {
+            ConfigureCenteredSafePanel(panelRect, preferredSize, new Vector2(96f, 72f), new Vector2(320f, 240f));
+        }
+
+        public static void ConfigureCenteredSafePanel(
+            RectTransform panelRect,
+            Vector2 preferredSize,
+            Vector2 safePadding,
+            Vector2 minimumSize)
+        {
+            if (panelRect == null)
+                return;
+
+            panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            panelRect.pivot = new Vector2(0.5f, 0.5f);
+            panelRect.anchoredPosition = Vector2.zero;
+            panelRect.sizeDelta = ClampPanelSize(preferredSize, safePadding, minimumSize);
+        }
+
+        public static Vector2 ClampPanelSize(Vector2 preferredSize, Vector2 safePadding, Vector2 minimumSize)
+        {
+            Vector2 maxSize = ScreenMenuReferenceResolution - safePadding * 2f;
+            float width = Mathf.Clamp(preferredSize.x, minimumSize.x, Mathf.Max(minimumSize.x, maxSize.x));
+            float height = Mathf.Clamp(preferredSize.y, minimumSize.y, Mathf.Max(minimumSize.y, maxSize.y));
+            return new Vector2(width, height);
+        }
+
+        static Vector3 ResolveWorldMenuOffset(Vector3 localOffset)
+        {
+            if (localOffset == Vector3.zero)
+                localOffset = WorldMenuLocalOffset;
+
+            if (localOffset.y > k_HighestComfortableWorldMenuY)
+                localOffset.y = WorldMenuLocalOffset.y;
+
+            localOffset.z = Mathf.Max(localOffset.z, k_MinWorldMenuDistance);
+            return localOffset;
         }
 
         public static GameObject CreateUIObject(string name, Transform parent)
@@ -210,6 +325,7 @@ namespace CIS5680VRGame.Gameplay
         {
             DisableAndRemember(Object.FindObjectsOfType<XRBaseInteractable>(true), disabledBehaviours);
             DisableAndRemember(Object.FindObjectsOfType<BallHolsterSlot>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<TeleportBallLauncher>(true), disabledBehaviours);
             DisableAndRemember(Object.FindObjectsOfType<RefillStationLocatorGuidance>(true), disabledBehaviours);
             DisableAndRemember(Object.FindObjectsOfType<MovementModeToggleInput>(true), disabledBehaviours);
 
@@ -232,6 +348,7 @@ namespace CIS5680VRGame.Gameplay
                 playerRig = Object.FindObjectOfType<XROrigin>();
 
             DisableAndRemember(Object.FindObjectsOfType<RefillStationLocatorGuidance>(true), disabledBehaviours);
+            DisableAndRemember(Object.FindObjectsOfType<TeleportBallLauncher>(true), disabledBehaviours);
             DisableAndRemember(Object.FindObjectsOfType<MovementModeToggleInput>(true), disabledBehaviours);
             DisableAndRemember(Object.FindObjectsOfType<InputActionManager>(true), disabledBehaviours);
             DisableAndRemember(Object.FindObjectsOfType<ControllerInputActionManager>(true), disabledBehaviours);

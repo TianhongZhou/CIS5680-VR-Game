@@ -29,6 +29,8 @@ namespace CIS5680VRGame.Progression
         [SerializeField] Vector2 m_GoldPanelSize = new(540f, 150f);
         [SerializeField] Vector2 m_UpgradePanelSize = new(440f, 360f);
         [SerializeField] Vector2 m_ActionButtonPanelSize = new(320f, 150f);
+        [SerializeField] Vector2 m_TutorialPromptPanelSize = new(980f, 520f);
+        [SerializeField] Vector3 m_TutorialPromptWorldOffset = new(0f, -0.34f, 1.9f);
         [SerializeField] float m_WorldCanvasScale = 0.0016f;
         [SerializeField, Range(0f, 1f)] float m_BackgroundMusicVolume = 0.18f;
         [Header("Safety")]
@@ -50,6 +52,7 @@ namespace CIS5680VRGame.Progression
         Button m_RefreshPlaceholderButton;
         AudioSource m_BackgroundMusicSource;
         AudioClip m_BackgroundMusicClip;
+        GameObject m_ShopTutorialRoot;
         MaterialPropertyBlock m_MarkerPropertyBlock;
         Material m_DefaultMarkerMaterial;
         Material m_MechanicMarkerMaterial;
@@ -63,8 +66,15 @@ namespace CIS5680VRGame.Progression
             m_MarkerPropertyBlock ??= new MaterialPropertyBlock();
             EnsureBackgroundMusic();
             BuildSafetyGeometry();
+        }
+
+        void Start()
+        {
+            // ProfileService applies pending tutorial gold and first-shop offers from
+            // its sceneLoaded callback, which runs after scene Awake and before Start.
             BuildRuntimeUi();
             RefreshAllUi();
+            ShowShopTutorialIfNeeded();
         }
 
         void BuildRuntimeUi()
@@ -101,6 +111,8 @@ namespace CIS5680VRGame.Progression
         {
             if (m_BackgroundMusicSource != null)
                 m_BackgroundMusicSource.Stop();
+
+            DestroyShopTutorialPrompt();
 
             if (m_MechanicMarkerMaterial != null)
             {
@@ -533,6 +545,104 @@ namespace CIS5680VRGame.Progression
                         ApplyMarkerVisual(upgradeView.MarkerTransform, upgradeView.Definition);
                 }
             }
+        }
+
+        void ShowShopTutorialIfNeeded()
+        {
+            if (!Application.isPlaying || !ProfileService.ShouldShowShopTutorial() || m_ShopTutorialRoot != null)
+                return;
+
+            Camera menuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
+            if (menuCamera == null)
+                return;
+
+            RectTransform panelRect;
+            m_ShopTutorialRoot = ModalMenuPauseUtility.CreateWorldSpaceMenuRoot(
+                "ShopTutorialPrompt",
+                menuCamera,
+                m_TutorialPromptPanelSize,
+                new Color(0f, 0f, 0f, 0.28f),
+                out panelRect,
+                m_TutorialPromptWorldOffset);
+
+            Canvas canvas = m_ShopTutorialRoot.GetComponent<Canvas>();
+            if (canvas != null)
+                canvas.sortingOrder = 4400;
+
+            GameObject panel = panelRect.gameObject;
+            Image panelImage = panel.AddComponent<Image>();
+            panelImage.color = new Color(0.02f, 0.05f, 0.09f, 0.94f);
+
+            VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(52, 52, 44, 44);
+            layout.spacing = 20f;
+            layout.childAlignment = TextAnchor.MiddleCenter;
+            layout.childControlHeight = false;
+            layout.childControlWidth = true;
+            layout.childForceExpandHeight = false;
+            layout.childForceExpandWidth = true;
+
+            ContentSizeFitter fitter = panel.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+            TMP_FontAsset fontAsset = ModalMenuPauseUtility.ResolveFontAsset();
+            CreateLabel(
+                "Title",
+                panel.transform,
+                "Shop Tutorial",
+                fontAsset,
+                54f,
+                FontStyles.Bold,
+                new Color(0.9f, 0.98f, 1f, 1f),
+                76f);
+
+            string grantLine = ProfileService.HasReceivedShopTutorialGoldGrant()
+                ? "You have 20 tutorial gold for this visit. Try buying upgrades or refreshing the offers."
+                : "Mazes award coins. Spend those coins here to buy upgrades or refresh the offers.";
+
+            CreateLabel(
+                "Body",
+                panel.transform,
+                $"{grantLine}\nPurchased upgrades shape your next run. When you are ready, press Start Next Run to enter the random maze.",
+                fontAsset,
+                26f,
+                FontStyles.Normal,
+                new Color(0.74f, 0.88f, 0.98f, 1f),
+                150f,
+                true);
+
+            CreateButton(
+                "DismissButton",
+                panel.transform,
+                "Got It",
+                fontAsset,
+                new Color(0.12f, 0.68f, 0.98f, 0.96f),
+                DismissShopTutorialPrompt,
+                UIButtonSoundStyle.Confirm,
+                24f,
+                new Vector2(240f, 64f));
+
+            ModalMenuPauseUtility.RefreshMenuLayout(m_ShopTutorialRoot, panelRect);
+        }
+
+        void DismissShopTutorialPrompt()
+        {
+            ProfileService.MarkShopTutorialSeen();
+            DestroyShopTutorialPrompt();
+        }
+
+        void DestroyShopTutorialPrompt()
+        {
+            if (m_ShopTutorialRoot == null)
+                return;
+
+            if (Application.isPlaying)
+                Destroy(m_ShopTutorialRoot);
+            else
+                DestroyImmediate(m_ShopTutorialRoot);
+
+            m_ShopTutorialRoot = null;
         }
 
         public void EditorRefreshUiForDebug()
