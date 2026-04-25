@@ -10,6 +10,9 @@ Shader "SonarBounce/PulseReveal"
         _PulseColor ("Pulse Color", Color) = (0.0, 0.8, 1.0, 1.0)
         _BgColor ("Background Color", Color) = (0.0, 0.0, 0.0, 1.0)
         _EmissionStrength ("Emission Strength", Float) = 3.0
+        _CircuitGlitchStrength ("Circuit Glitch Strength", Range(0.0, 1.0)) = 0.0
+        _CircuitGlitchTime ("Circuit Glitch Time", Float) = 0.0
+        _CircuitGlitchSeed ("Circuit Glitch Seed", Float) = 0.0
     }
 
     SubShader
@@ -60,6 +63,9 @@ Shader "SonarBounce/PulseReveal"
                 float4 _PulseColor;
                 float4 _BgColor;
                 float  _EmissionStrength;
+                float  _CircuitGlitchStrength;
+                float  _CircuitGlitchTime;
+                float  _CircuitGlitchSeed;
             CBUFFER_END
 
             struct Attributes
@@ -117,6 +123,13 @@ Shader "SonarBounce/PulseReveal"
                 float2 grid = abs(frac(gridUv * density) - 0.5);
                 float lineMask = step(min(grid.x, grid.y), lineWidth);
                 return lineMask;
+            }
+
+            float Hash21(float2 p)
+            {
+                p = frac(p * float2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return frac(p.x * p.y);
             }
 
             float4 frag(Varyings IN) : SV_Target
@@ -226,9 +239,27 @@ Shader "SonarBounce/PulseReveal"
 
                 float2 gridUv = _UseMeshGridUv > 0.5 ? IN.gridUv : ComputeWorldGridUv(wPos, wNorm);
                 float gridMask = ComputeGrid(gridUv, _GridDensity, _GridLineWidth);
+                float glitchStrength = saturate(_CircuitGlitchStrength);
+                float revealGate = step(0.001, totalReveal);
+                float surge = 0.0;
+
+                if (glitchStrength > 0.001)
+                {
+                    float segmentRate = lerp(2.5, 6.0, glitchStrength);
+                    float2 segmentCell = floor(gridUv * max(0.01, _GridDensity) * segmentRate);
+                    float frame = floor(_CircuitGlitchTime * lerp(5.0, 18.0, glitchStrength));
+                    float outageNoise = Hash21(segmentCell + float2(_CircuitGlitchSeed, frame));
+                    float surgeNoise = Hash21(segmentCell * 1.73 + float2(frame * 0.37, _CircuitGlitchSeed * 3.11));
+                    float outage = step(1.0 - glitchStrength * 0.55, outageNoise);
+                    surge = step(1.0 - glitchStrength * 0.32, surgeNoise);
+
+                    gridMask *= lerp(1.0, 1.0 - outage * 0.92, glitchStrength * revealGate);
+                    surge *= revealGate;
+                }
 
                 float fillFactor = 0.08; 
                 float brightness = lerp(fillFactor, 1.0, gridMask);
+                brightness *= 1.0 + surge * glitchStrength * 1.65;
 
                 float3 litColor = _PulseColor.rgb * brightness * _EmissionStrength * totalReveal;
                 float3 finalColor = lerp(_BgColor.rgb, litColor, totalReveal);

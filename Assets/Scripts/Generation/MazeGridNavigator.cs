@@ -339,7 +339,7 @@ namespace CIS5680VRGame.Generation
                 m_ModulePlacer = FindObjectOfType<MazeModulePlacer>();
         }
 
-        static void AppendNeighborIfConnected(
+        void AppendNeighborIfConnected(
             MazeCellData cell,
             MazeCellConnection requiredConnection,
             Vector2Int direction,
@@ -348,8 +348,15 @@ namespace CIS5680VRGame.Generation
             if (cell == null || results == null)
                 return;
 
-            if (!cell.Connections.HasFlag(requiredConnection))
+            if (m_Bootstrap != null)
+            {
+                if (!m_Bootstrap.IsMazeConnectionTraversable(cell, requiredConnection))
+                    return;
+            }
+            else if (!cell.Connections.HasFlag(requiredConnection))
+            {
                 return;
+            }
 
             results.Add(cell.GridPosition + direction);
         }

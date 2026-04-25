@@ -56,6 +56,7 @@ namespace CIS5680VRGame.Generation
         [SerializeField, HideInInspector, Min(0)] int m_HealthRefillCount = 1;
         [SerializeField, HideInInspector, Min(0)] int m_TrapCount = 1;
         [SerializeField, HideInInspector, Min(0)] int m_RewardCount = 2;
+        [SerializeField, HideInInspector, Min(0)] int m_HiddenDoorCount = 1;
 
         [Header("Placement Rules")]
         [SerializeField, HideInInspector, Min(0)] int m_MinSameTypeCellDistance = 2;
@@ -142,12 +143,13 @@ namespace CIS5680VRGame.Generation
             NormalizeSerializedValues();
         }
 
-        public void ApplyPlacementProfile(int energyRefillCount, int healthRefillCount, int trapCount, int rewardCount)
+        public void ApplyPlacementProfile(int energyRefillCount, int healthRefillCount, int trapCount, int rewardCount, int hiddenDoorCount)
         {
             m_EnergyRefillCount = Mathf.Max(0, energyRefillCount);
             m_HealthRefillCount = Mathf.Max(0, healthRefillCount);
             m_TrapCount = Mathf.Max(0, trapCount);
             m_RewardCount = Mathf.Max(0, rewardCount);
+            m_HiddenDoorCount = Mathf.Max(0, hiddenDoorCount);
             NormalizeSerializedValues();
         }
 
@@ -230,6 +232,7 @@ namespace CIS5680VRGame.Generation
             m_HealthRefillCount = Mathf.Max(0, m_HealthRefillCount);
             m_TrapCount = Mathf.Max(0, m_TrapCount);
             m_RewardCount = Mathf.Max(0, m_RewardCount);
+            m_HiddenDoorCount = Mathf.Max(0, m_HiddenDoorCount);
             m_MinSameTypeCellDistance = Mathf.Max(0, m_MinSameTypeCellDistance);
             m_MinCrossTypeCellDistance = Mathf.Max(0, m_MinCrossTypeCellDistance);
             m_StartSafeDistance = Mathf.Max(0, m_StartSafeDistance);
@@ -955,6 +958,7 @@ namespace CIS5680VRGame.Generation
             AssignHealthRefills(layout, rng, mainPath);
             AssignTraps(layout, rng, mainPath);
             AssignRewards(layout, rng, mainPath);
+            AssignHiddenDoors(layout, rng, mainPath);
         }
 
         void AssignEnergyRefills(MazeLayout layout, System.Random rng, List<Vector2Int> mainPath)
@@ -1103,6 +1107,109 @@ namespace CIS5680VRGame.Generation
                 stageDebug);
 
             WarnIfPlacementShortfall(MazeCellRole.Reward, m_RewardCount, remaining, layout.Seed, stageDebug, "soft-target");
+        }
+
+        void AssignHiddenDoors(MazeLayout layout, System.Random rng, List<Vector2Int> mainPath)
+        {
+            int remaining = m_HiddenDoorCount;
+            if (remaining <= 0)
+                return;
+
+            var stageDebug = new List<string>();
+            remaining -= AssignHiddenDoorsToCandidates(
+                layout,
+                BuildShuffledCandidates(
+                    layout,
+                    rng,
+                    cell => cell.Role == MazeCellRole.Reward
+                        && !cell.IsMainPath
+                        && GetConnectionCount(cell.Connections) == 1
+                        && ResolveBranchDepth(layout, cell) >= m_RewardMinBranchDepth),
+                remaining,
+                "strict: reward branch dead-end",
+                stageDebug);
+            remaining -= AssignHiddenDoorsToCandidates(
+                layout,
+                BuildShuffledCandidates(
+                    layout,
+                    rng,
+                    cell => cell.Role == MazeCellRole.Reward
+                        && !cell.IsMainPath
+                        && ResolveBranchDepth(layout, cell) >= m_RewardMinBranchDepth),
+                remaining,
+                "fallback-1: reward branch cell",
+                stageDebug);
+            remaining -= AssignHiddenDoorsToCandidates(
+                layout,
+                BuildShuffledCandidates(
+                    layout,
+                    rng,
+                    cell => !cell.IsMainPath
+                        && cell.Role is MazeCellRole.Neutral or MazeCellRole.Refill or MazeCellRole.HealthRefill
+                        && GetConnectionCount(cell.Connections) == 1
+                        && ResolveZoneForCell(cell, mainPath.Count) != MazePathZone.Start),
+                remaining,
+                "fallback-2: non-start branch dead-end",
+                stageDebug);
+            remaining -= AssignHiddenDoorsToCandidates(
+                layout,
+                BuildShuffledCandidates(
+                    layout,
+                    rng,
+                    cell => !cell.IsMainPath
+                        && cell.Role is MazeCellRole.Neutral or MazeCellRole.Refill or MazeCellRole.HealthRefill
+                        && ResolveZoneForCell(cell, mainPath.Count) != MazePathZone.Start),
+                remaining,
+                "fallback-3: non-start branch cell",
+                stageDebug);
+
+            WarnIfHiddenDoorPlacementShortfall(m_HiddenDoorCount, remaining, layout.Seed, stageDebug);
+        }
+
+        int AssignHiddenDoorsToCandidates(
+            MazeLayout layout,
+            IList<Vector2Int> candidates,
+            int maxAssignments,
+            string stageLabel,
+            ICollection<string> stageDebug)
+        {
+            if (layout == null || candidates == null || maxAssignments <= 0)
+                return 0;
+
+            int assigned = 0;
+            for (int i = 0; i < candidates.Count && assigned < maxAssignments; i++)
+            {
+                if (!TryAssignHiddenDoorAt(layout, candidates[i]))
+                    continue;
+
+                assigned++;
+            }
+
+            stageDebug?.Add($"{stageLabel}: {assigned}/{maxAssignments}");
+            return assigned;
+        }
+
+        bool TryAssignHiddenDoorAt(MazeLayout layout, Vector2Int position)
+        {
+            if (layout == null || !layout.TryGetCell(position, out MazeCellData cell))
+                return false;
+
+            if (cell == null || cell.IsMainPath || cell.HiddenDoorConnections != MazeCellConnection.None)
+                return false;
+
+            if (cell.Role is MazeCellRole.Start or MazeCellRole.Goal or MazeCellRole.Trap)
+                return false;
+
+            MazeCellData predecessor = FindPathPredecessor(layout, cell);
+            if (predecessor == null)
+                return false;
+
+            MazeCellConnection doorConnection = MazeLayout.ResolveConnectionFlag(cell.GridPosition, predecessor.GridPosition);
+            if (!cell.Connections.HasFlag(doorConnection))
+                return false;
+
+            cell.HiddenDoorConnections |= doorConnection;
+            return true;
         }
 
         int AssignRoleToCandidates(
@@ -1366,6 +1473,33 @@ namespace CIS5680VRGame.Generation
 
             Debug.LogWarning(
                 $"MazeGenerator could only place {placedCount}/{requestedCount} {role} cells for seed {seed} [{priority}]. Stages: {stageSummary}",
+                this);
+        }
+
+        void WarnIfHiddenDoorPlacementShortfall(
+            int requestedCount,
+            int remainingCount,
+            int seed,
+            IList<string> stageDebug)
+        {
+            if (!m_EmitDiagnostics)
+                return;
+
+            string stageSummary = stageDebug != null && stageDebug.Count > 0
+                ? string.Join(", ", stageDebug)
+                : "no stage data";
+
+            int placedCount = requestedCount - remainingCount;
+            if (remainingCount <= 0)
+            {
+                Debug.Log(
+                    $"MazeGenerator placed {placedCount}/{requestedCount} resonance hidden doors for seed {seed} [optional-branch terrain]. Stages: {stageSummary}",
+                    this);
+                return;
+            }
+
+            Debug.LogWarning(
+                $"MazeGenerator could only place {placedCount}/{requestedCount} resonance hidden doors for seed {seed} [optional-branch terrain]. Stages: {stageSummary}",
                 this);
         }
 
@@ -1640,6 +1774,7 @@ namespace CIS5680VRGame.Generation
         public MazeCellRole Role { get; set; }
         public MazePathZone PathZone { get; set; }
         public MazeCellConnection Connections { get; set; }
+        public MazeCellConnection HiddenDoorConnections { get; set; }
     }
 
     public sealed class MazeLayout
@@ -1706,7 +1841,7 @@ namespace CIS5680VRGame.Generation
             target.Connections |= targetFlag;
         }
 
-        static MazeCellConnection ResolveConnectionFlag(Vector2Int from, Vector2Int to)
+        public static MazeCellConnection ResolveConnectionFlag(Vector2Int from, Vector2Int to)
         {
             Vector2Int delta = to - from;
             if (delta == Vector2Int.up)

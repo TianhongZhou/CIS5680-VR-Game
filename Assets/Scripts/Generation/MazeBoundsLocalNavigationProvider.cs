@@ -41,7 +41,7 @@ namespace CIS5680VRGame.Generation
                 return false;
 
             Vector3 projectedStart = ClampToBounds(module.WalkableBounds, startWorldPosition, m_VerticalPadding);
-            if (TryBuildLocalGraphPath(module, projectedStart, projectedTarget, waypointBuffer))
+            if (TryBuildLocalGraphPath(module, startWorldPosition, projectedStart, projectedTarget, waypointBuffer))
                 return true;
 
             if ((projectedStart - projectedTarget).sqrMagnitude > 0.0004f)
@@ -70,7 +70,7 @@ namespace CIS5680VRGame.Generation
 
             Vector3 projectedStart = ClampToBounds(fromModule.WalkableBounds, startWorldPosition, m_VerticalPadding);
             Vector3 projectedTarget = ClampToBounds(toModule.WalkableBounds, desiredWorldPosition, m_VerticalPadding);
-            if (TryBuildCrossModuleLocalGraphPath(fromModule, toModule, projectedStart, projectedTarget, waypointBuffer))
+            if (TryBuildCrossModuleLocalGraphPath(fromModule, toModule, startWorldPosition, projectedStart, projectedTarget, waypointBuffer))
                 return true;
 
             Bounds mergedBounds = fromModule.WalkableBounds;
@@ -88,6 +88,7 @@ namespace CIS5680VRGame.Generation
 
         bool TryBuildLocalGraphPath(
             MazeNavigationModuleRecord module,
+            Vector3 actualStart,
             Vector3 projectedStart,
             Vector3 projectedTarget,
             List<Vector3> waypointBuffer)
@@ -95,7 +96,7 @@ namespace CIS5680VRGame.Generation
             if (module == null || !module.HasLocalNavigationGraph)
                 return false;
 
-            if (!module.TryGetNearestLocalNode(projectedStart, out MazeModuleLocalNavigationNodeRecord startNode)
+            if (!module.TryGetNearestLocalNode(projectedStart, out MazeModuleLocalNavigationNodeRecord startNode, preferInteriorNodes: false)
                 || !module.TryGetNearestLocalNode(projectedTarget, out MazeModuleLocalNavigationNodeRecord targetNode))
             {
                 return false;
@@ -108,10 +109,11 @@ namespace CIS5680VRGame.Generation
             }
 
             waypointBuffer.Clear();
-            if ((projectedStart - m_LocalPathBuffer[0].WorldPosition).sqrMagnitude > 0.0004f)
+            int firstPathIndex = ResolveFirstUsableLocalPathIndex(projectedStart, m_LocalPathBuffer);
+            if (ShouldAddProjectedStartWaypoint(actualStart, projectedStart, m_LocalPathBuffer[firstPathIndex].WorldPosition))
                 waypointBuffer.Add(projectedStart);
 
-            for (int i = 0; i < m_LocalPathBuffer.Count; i++)
+            for (int i = firstPathIndex; i < m_LocalPathBuffer.Count; i++)
             {
                 Vector3 worldPosition = m_LocalPathBuffer[i].WorldPosition;
                 if (waypointBuffer.Count > 0 && (waypointBuffer[waypointBuffer.Count - 1] - worldPosition).sqrMagnitude <= 0.0004f)
@@ -129,6 +131,7 @@ namespace CIS5680VRGame.Generation
         bool TryBuildCrossModuleLocalGraphPath(
             MazeNavigationModuleRecord fromModule,
             MazeNavigationModuleRecord toModule,
+            Vector3 actualStart,
             Vector3 projectedStart,
             Vector3 projectedTarget,
             List<Vector3> waypointBuffer)
@@ -136,7 +139,7 @@ namespace CIS5680VRGame.Generation
             if (fromModule == null || toModule == null || !fromModule.HasLocalNavigationGraph || !toModule.HasLocalNavigationGraph)
                 return false;
 
-            if (!fromModule.TryGetNearestLocalNode(projectedStart, out MazeModuleLocalNavigationNodeRecord startNode)
+            if (!fromModule.TryGetNearestLocalNode(projectedStart, out MazeModuleLocalNavigationNodeRecord startNode, preferInteriorNodes: false)
                 || !toModule.TryGetNearestLocalNode(projectedTarget, out MazeModuleLocalNavigationNodeRecord targetNode))
             {
                 return false;
@@ -180,10 +183,11 @@ namespace CIS5680VRGame.Generation
             }
 
             waypointBuffer.Clear();
-            if ((projectedStart - m_FromLocalPathBuffer[0].WorldPosition).sqrMagnitude > 0.0004f)
+            int firstFromPathIndex = ResolveFirstUsableLocalPathIndex(projectedStart, m_FromLocalPathBuffer);
+            if (ShouldAddProjectedStartWaypoint(actualStart, projectedStart, m_FromLocalPathBuffer[firstFromPathIndex].WorldPosition))
                 waypointBuffer.Add(projectedStart);
 
-            AppendUniqueWaypoints(waypointBuffer, m_FromLocalPathBuffer);
+            AppendUniqueWaypoints(waypointBuffer, m_FromLocalPathBuffer, firstFromPathIndex);
             AppendUniqueWaypoint(waypointBuffer, bestToPortal.WorldPosition);
             AppendUniqueWaypoints(waypointBuffer, m_ToLocalPathBuffer);
 
@@ -191,6 +195,34 @@ namespace CIS5680VRGame.Generation
                 waypointBuffer.Add(projectedTarget);
 
             return waypointBuffer.Count > 0;
+        }
+
+        static int ResolveFirstUsableLocalPathIndex(Vector3 projectedStart, List<MazeModuleLocalNavigationNodeRecord> localPath)
+        {
+            if (localPath == null || localPath.Count < 2)
+                return 0;
+
+            Vector3 firstToSecond = ProjectPlanar(localPath[1].WorldPosition - localPath[0].WorldPosition);
+            float segmentLengthSqr = firstToSecond.sqrMagnitude;
+            if (segmentLengthSqr <= 0.0004f)
+                return 0;
+
+            Vector3 firstToStart = ProjectPlanar(projectedStart - localPath[0].WorldPosition);
+            float progressAlongSegment = Vector3.Dot(firstToStart, firstToSecond) / segmentLengthSqr;
+            return progressAlongSegment > 0.05f ? 1 : 0;
+        }
+
+        static bool ShouldAddProjectedStartWaypoint(Vector3 actualStart, Vector3 projectedStart, Vector3 nextWaypoint)
+        {
+            Vector3 actualToProjected = ProjectPlanar(projectedStart - actualStart);
+            if (actualToProjected.sqrMagnitude <= 0.0004f)
+                return false;
+
+            Vector3 actualToNext = ProjectPlanar(nextWaypoint - actualStart);
+            if (actualToNext.sqrMagnitude <= 0.0004f)
+                return true;
+
+            return Vector3.Dot(actualToProjected.normalized, actualToNext.normalized) > 0.05f;
         }
 
         static void CollectPortalNodes(MazeNavigationModuleRecord module, List<MazeModuleLocalNavigationNodeRecord> portalBuffer)
@@ -208,12 +240,12 @@ namespace CIS5680VRGame.Generation
             }
         }
 
-        static void AppendUniqueWaypoints(List<Vector3> waypointBuffer, List<MazeModuleLocalNavigationNodeRecord> localNodes)
+        static void AppendUniqueWaypoints(List<Vector3> waypointBuffer, List<MazeModuleLocalNavigationNodeRecord> localNodes, int startIndex = 0)
         {
             if (waypointBuffer == null || localNodes == null)
                 return;
 
-            for (int i = 0; i < localNodes.Count; i++)
+            for (int i = Mathf.Clamp(startIndex, 0, localNodes.Count); i < localNodes.Count; i++)
                 AppendUniqueWaypoint(waypointBuffer, localNodes[i].WorldPosition);
         }
 
@@ -230,6 +262,11 @@ namespace CIS5680VRGame.Generation
             float deltaX = from.x - to.x;
             float deltaZ = from.z - to.z;
             return deltaX * deltaX + deltaZ * deltaZ;
+        }
+
+        static Vector3 ProjectPlanar(Vector3 value)
+        {
+            return new Vector3(value.x, 0f, value.z);
         }
 
         static Vector3 ClampToBounds(Bounds bounds, Vector3 position, float verticalPadding)

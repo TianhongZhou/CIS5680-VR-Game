@@ -15,7 +15,8 @@
         "energyRefillCount": 8,
         "healthRefillCount": 5,
         "trapCount": 6,
-        "rewardCount": 5
+        "rewardCount": 5,
+        "hiddenDoorCount": 3
     },
     "placementRules": {
         "minSameTypeCellDistance": 4,

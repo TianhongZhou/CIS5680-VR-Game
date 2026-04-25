@@ -59,6 +59,8 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Vector3 m_CoinResponseRingScaleMultiplier = new(0.6f, 0.6f, 0.6f);
         [SerializeField] Vector3 m_GoalHighlightScaleMultiplier = new(1.09f, 1.03f, 1.09f);
         [SerializeField] float m_GoalHighlightLift = 0.002f;
+        [SerializeField] Vector3 m_CoinHighlightScaleMultiplier = new(1.045f, 1.045f, 1.045f);
+        [SerializeField] float m_CoinHighlightLift = 0f;
         [SerializeField] Color m_UnvisitedColor = new(1f, 0.64f, 0.12f, 0.9f);
         [SerializeField] Color m_VisitedColor = new(0.18f, 0.84f, 0.96f, 0.92f);
         [SerializeField] Color m_GoalColor = new(0.32f, 1f, 0.46f, 0.96f);
@@ -524,7 +526,49 @@ namespace CIS5680VRGame.Gameplay
 
         LocatorMarker CreateRewardMarker(RewardPickup rewardPickup)
         {
-            return CreateMarker(rewardPickup.name, LocatorMarkerKind.CoinReward, null, null, rewardPickup);
+            var markerRoot = new GameObject($"{rewardPickup.name}_LocatorHighlight");
+            markerRoot.hideFlags = HideFlags.DontSave;
+            markerRoot.SetActive(false);
+
+            var marker = new LocatorMarker
+            {
+                Kind = LocatorMarkerKind.CoinReward,
+                RewardPickup = rewardPickup,
+                RootObject = markerRoot,
+                VisibleFrom = 0f,
+                VisibleUntil = 0f,
+            };
+
+            var rewardRenderers = rewardPickup.GetComponentsInChildren<MeshRenderer>(true);
+            for (int i = 0; i < rewardRenderers.Length; i++)
+            {
+                MeshRenderer sourceRenderer = rewardRenderers[i];
+                if (sourceRenderer == null)
+                    continue;
+
+                MeshFilter sourceFilter = sourceRenderer.GetComponent<MeshFilter>();
+                if (sourceFilter == null || sourceFilter.sharedMesh == null)
+                    continue;
+
+                Transform highlightTransform = CreateHighlightMesh(
+                    $"{sourceRenderer.name}_CoinHighlight",
+                    markerRoot.transform,
+                    sourceFilter.sharedMesh,
+                    out MeshRenderer highlightRenderer);
+
+                marker.GoalMeshParts.Add(new GoalMeshPart
+                {
+                    SourceTransform = sourceRenderer.transform,
+                    SourceRenderer = sourceRenderer,
+                    HighlightTransform = highlightTransform,
+                    HighlightRenderer = highlightRenderer,
+                });
+            }
+
+            if (marker.GoalMeshParts.Count == 0)
+                return CreateMarker(rewardPickup.name, LocatorMarkerKind.CoinReward, null, null, rewardPickup);
+
+            return marker;
         }
 
         LocatorMarker CreateEnemyMarker(EnemyPatrolController enemy)
@@ -868,17 +912,33 @@ namespace CIS5680VRGame.Gameplay
                     continue;
 
                 Vector3 sourceScale = meshPart.SourceTransform.lossyScale;
-                Vector3 scaledSize = Vector3.Scale(sourceScale, m_GoalHighlightScaleMultiplier);
+                Vector3 scaleMultiplier = ResolveMeshHighlightScaleMultiplier(marker.Kind);
+                Vector3 scaledSize = Vector3.Scale(sourceScale, scaleMultiplier);
                 Vector3 sourceUp = meshPart.SourceTransform.up.sqrMagnitude < 0.0001f ? Vector3.up : meshPart.SourceTransform.up.normalized;
                 float sourceHeight = meshPart.SourceRenderer != null ? meshPart.SourceRenderer.bounds.size.y : 0f;
-                float extraHeight = Mathf.Max(0f, sourceHeight * (m_GoalHighlightScaleMultiplier.y - 1f));
-                float lift = extraHeight * 0.5f + Mathf.Max(0f, m_GoalHighlightLift);
+                float lift = ResolveMeshHighlightLift(marker.Kind, sourceHeight, scaleMultiplier);
 
                 meshPart.HighlightTransform.SetPositionAndRotation(
                     meshPart.SourceTransform.position + sourceUp * lift,
                     meshPart.SourceTransform.rotation);
                 meshPart.HighlightTransform.localScale = scaledSize;
             }
+        }
+
+        Vector3 ResolveMeshHighlightScaleMultiplier(LocatorMarkerKind kind)
+        {
+            return kind == LocatorMarkerKind.CoinReward
+                ? m_CoinHighlightScaleMultiplier
+                : m_GoalHighlightScaleMultiplier;
+        }
+
+        float ResolveMeshHighlightLift(LocatorMarkerKind kind, float sourceHeight, Vector3 scaleMultiplier)
+        {
+            if (kind == LocatorMarkerKind.CoinReward)
+                return Mathf.Max(0f, m_CoinHighlightLift);
+
+            float extraHeight = Mathf.Max(0f, sourceHeight * (scaleMultiplier.y - 1f));
+            return extraHeight * 0.5f + Mathf.Max(0f, m_GoalHighlightLift);
         }
 
         void UpdateMarkerVisuals(LocatorMarker marker)

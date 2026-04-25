@@ -69,6 +69,8 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] float m_EyeVerticalLead = 0.12f;
         [SerializeField] float m_CorridorCenteringSpeed = 3.1f;
         [SerializeField] float m_PathNodeArrivalDistance = 0.4f;
+        [SerializeField, Min(0.01f)] float m_StuckProgressDistance = 0.08f;
+        [SerializeField, Min(0.25f)] float m_StuckRecoveryDelay = 1.4f;
 
         readonly RaycastHit[] m_ProbeHits = new RaycastHit[8];
         readonly List<Vector2Int> m_GridPath = new(16);
@@ -77,6 +79,8 @@ namespace CIS5680VRGame.Gameplay
         readonly List<int> m_NavigationNodePath = new(16);
         readonly List<Vector3> m_NavigationWaypointPath = new(16);
         readonly List<Vector3> m_LocalNavigationWaypoints = new(8);
+        readonly List<Vector2Int> m_GridReachabilityPath = new(16);
+        readonly List<int> m_NavigationReachabilityPath = new(16);
 
         Rigidbody m_Rigidbody;
         Collider[] m_SelfColliders;
@@ -108,6 +112,8 @@ namespace CIS5680VRGame.Gameplay
         bool m_HasLastPatrolCell;
         bool m_HasLastGridSegmentStep;
         bool m_IsWaitingAtSearchPoint;
+        Vector3 m_LastProgressPosition;
+        float m_LastProgressAt;
 
         public bool IsChasing => m_State == EnemyState.Chase;
         public bool IsAlerted => m_State == EnemyState.Chase || m_State == EnemyState.Search;
@@ -147,6 +153,26 @@ namespace CIS5680VRGame.Gameplay
             }
 
             return false;
+        }
+
+        public static bool HasChasingEnemy()
+        {
+            foreach (EnemyPatrolController controller in s_ActiveControllers)
+            {
+                if (controller != null && controller.isActiveAndEnabled && controller.IsChasing)
+                    return true;
+            }
+
+            return false;
+        }
+
+        public static void NotifyMazeNavigationTopologyChanged()
+        {
+            foreach (EnemyPatrolController controller in s_ActiveControllers)
+            {
+                if (controller != null && controller.isActiveAndEnabled)
+                    controller.HandleMazeNavigationTopologyChanged();
+            }
         }
 
         public static void SetGlobalDetectionRangeReductionMeters(float reductionMeters)
@@ -190,12 +216,14 @@ namespace CIS5680VRGame.Gameplay
             m_RoamCenter = ResolveRoamCenter();
             m_CurrentMoveDirection = GetInitialMoveDirection();
             m_CurrentEyeLocalOffset = GetDefaultEyeLocalOffset();
+            MarkMovementProgress();
             PickNewPatrolDirection(forceAnchorBias: false);
         }
 
         void OnEnable()
         {
             s_ActiveControllers.Add(this);
+            MarkMovementProgress();
         }
 
         void OnDisable()
@@ -229,6 +257,9 @@ namespace CIS5680VRGame.Gameplay
             ResolvePlayerReferences();
             UpdateAwareness();
 
+            if (TryRecoverFromMovementStall())
+                return;
+
             if (m_State == EnemyState.Chase)
             {
                 if (TryUpdateNavigationGraphChase())
@@ -236,6 +267,12 @@ namespace CIS5680VRGame.Gameplay
 
                 if (TryUpdateGridChase())
                     return;
+
+                if (ShouldStopAtUnreachableMazeTarget(m_LastKnownPlayerPosition))
+                {
+                    BeginBlockedMazeSearchAtCurrentPosition();
+                    return;
+                }
 
                 ClearNavigationPathState();
                 ClearGridSegmentState();
@@ -667,6 +704,8 @@ namespace CIS5680VRGame.Gameplay
             m_EyeVerticalLead = Mathf.Clamp(m_EyeVerticalLead, -0.5f, 0.5f);
             m_CorridorCenteringSpeed = Mathf.Max(0.1f, m_CorridorCenteringSpeed);
             m_PathNodeArrivalDistance = Mathf.Clamp(m_PathNodeArrivalDistance, 0.05f, 2f);
+            m_StuckProgressDistance = Mathf.Max(0.01f, m_StuckProgressDistance);
+            m_StuckRecoveryDelay = Mathf.Max(0.25f, m_StuckRecoveryDelay);
         }
 
         void ResolvePlayerReferences()
@@ -694,6 +733,14 @@ namespace CIS5680VRGame.Gameplay
         {
             if (TryGetPursuitLockPlayerPosition(out Vector3 lockedPlayerGroundPosition))
             {
+                if (!CanReachMazeTarget(lockedPlayerGroundPosition))
+                {
+                    if (m_State == EnemyState.Chase)
+                        BeginBlockedMazeSearchAtCurrentPosition();
+
+                    return;
+                }
+
                 if (m_State != EnemyState.Chase)
                     ClearGridNavigationState(keepPatrolTarget: false);
 
@@ -706,6 +753,14 @@ namespace CIS5680VRGame.Gameplay
 
             if (TryDetectPlayer(out Vector3 playerGroundPosition))
             {
+                if (!CanReachMazeTarget(playerGroundPosition))
+                {
+                    if (m_State == EnemyState.Chase)
+                        BeginBlockedMazeSearchAtCurrentPosition();
+
+                    return;
+                }
+
                 if (m_State != EnemyState.Chase)
                     ClearGridNavigationState(keepPatrolTarget: false);
 
@@ -774,6 +829,12 @@ namespace CIS5680VRGame.Gameplay
             if (planarToPlayer.magnitude > EffectiveOccludedSoftLockDistance)
                 return false;
 
+            if (!CanReachMazeTarget(GetGroundPosition(playerAnchorPosition)))
+            {
+                BeginBlockedMazeSearchAtCurrentPosition();
+                return true;
+            }
+
             if (HasLineOfSight(sensorPosition, playerViewPosition))
                 return false;
 
@@ -835,6 +896,12 @@ namespace CIS5680VRGame.Gameplay
 
             if (TryUpdateGridSearch())
                 return true;
+
+            if (ShouldStopAtUnreachableMazeTarget(m_SearchTargetPosition))
+            {
+                BeginBlockedMazeSearchAtCurrentPosition();
+                return true;
+            }
 
             if (IsNearWorldPosition(m_SearchTargetPosition))
             {
@@ -1014,6 +1081,14 @@ namespace CIS5680VRGame.Gameplay
         {
             m_NavigationNodePath.Clear();
             m_NavigationWaypointPath.Clear();
+            if (hasTargetCell
+                && CanUseGridNavigation
+                && m_GridNavigator.TryGetCellAtWorldPosition(startWorldPosition, out MazeCellData startCell)
+                && !m_GridNavigator.TryFindPath(startCell.GridPosition, targetCell, m_GridReachabilityPath))
+            {
+                return false;
+            }
+
             if (!m_NavigationGraph.TryFindPath(startWorldPosition, targetWorldPosition, m_NavigationNodePath))
                 return false;
 
@@ -1257,8 +1332,140 @@ namespace CIS5680VRGame.Gameplay
             MoveRigidBody(currentPosition, m_CurrentMoveDirection);
         }
 
+        bool ShouldStopAtUnreachableMazeTarget(Vector3 targetWorldPosition)
+        {
+            return (CanUseNavigationGraph || CanUseGridNavigation) && !CanReachMazeTarget(targetWorldPosition);
+        }
+
+        bool CanReachMazeTarget(Vector3 targetWorldPosition)
+        {
+            Vector3 startWorldPosition = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
+            bool usedMazeNavigation = false;
+
+            if (CanUseGridNavigation
+                && m_GridNavigator.TryGetCellAtWorldPosition(startWorldPosition, out MazeCellData startCell)
+                && m_GridNavigator.TryGetCellAtWorldPosition(targetWorldPosition, out MazeCellData targetCell))
+            {
+                usedMazeNavigation = true;
+                return m_GridNavigator.TryFindPath(startCell.GridPosition, targetCell.GridPosition, m_GridReachabilityPath);
+            }
+
+            if (CanUseNavigationGraph)
+            {
+                usedMazeNavigation = true;
+                if (m_NavigationGraph.TryFindPath(startWorldPosition, targetWorldPosition, m_NavigationReachabilityPath))
+                    return true;
+            }
+
+            if (CanUseGridNavigation)
+            {
+                usedMazeNavigation = true;
+                if (m_GridNavigator.TryFindPath(startWorldPosition, targetWorldPosition, m_GridReachabilityPath))
+                    return true;
+            }
+
+            return !usedMazeNavigation;
+        }
+
+        void BeginBlockedMazeSearchAtCurrentPosition()
+        {
+            if (m_State == EnemyState.Search && m_IsWaitingAtSearchPoint)
+                return;
+
+            Vector3 currentPosition = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
+            currentPosition.y = m_SpawnPosition.y;
+            m_State = EnemyState.Search;
+            m_LastKnownPlayerPosition = currentPosition;
+            m_SearchTargetPosition = currentPosition;
+            m_IsWaitingAtSearchPoint = false;
+            ClearGridNavigationState(keepPatrolTarget: false);
+            BeginSearchWait();
+            MarkMovementProgress();
+        }
+
+        void HandleMazeNavigationTopologyChanged()
+        {
+            ClearGridNavigationState(keepPatrolTarget: false);
+            MarkMovementProgress();
+        }
+
+        bool TryRecoverFromMovementStall()
+        {
+            Vector3 currentPosition = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
+            Vector3 planarDelta = Vector3.ProjectOnPlane(currentPosition - m_LastProgressPosition, Vector3.up);
+            float progressThreshold = Mathf.Max(0.01f, m_StuckProgressDistance);
+            if (planarDelta.sqrMagnitude >= progressThreshold * progressThreshold)
+            {
+                MarkMovementProgress(currentPosition);
+                return false;
+            }
+
+            if (!ShouldExpectMovementProgress())
+            {
+                MarkMovementProgress(currentPosition);
+                return false;
+            }
+
+            if (Time.time - m_LastProgressAt < Mathf.Max(0.25f, m_StuckRecoveryDelay))
+                return false;
+
+            RecoverFromMovementStall(currentPosition);
+            MarkMovementProgress(currentPosition);
+            return true;
+        }
+
+        bool ShouldExpectMovementProgress()
+        {
+            if (m_State == EnemyState.Search && m_IsWaitingAtSearchPoint)
+                return false;
+
+            if (m_State == EnemyState.Chase || m_State == EnemyState.Search)
+                return true;
+
+            return m_State == EnemyState.Patrol
+                || m_HasCurrentPatrolTargetCell
+                || m_HasCurrentNavigationGoalCell
+                || m_HasCurrentPathGoalCell
+                || m_NavigationWaypointPath.Count > 0
+                || m_GridPath.Count > 0
+                || m_LocalNavigationWaypoints.Count > 0;
+        }
+
+        void RecoverFromMovementStall(Vector3 currentPosition)
+        {
+            ClearGridNavigationState(keepPatrolTarget: false);
+            m_CurrentMoveDirection = Vector3.zero;
+
+            if (m_State == EnemyState.Chase || m_State == EnemyState.Search)
+            {
+                m_State = EnemyState.Search;
+                m_LastKnownPlayerPosition = currentPosition;
+                m_SearchTargetPosition = currentPosition;
+                m_IsWaitingAtSearchPoint = false;
+                BeginSearchWait();
+                return;
+            }
+
+            m_HasLastPatrolCell = false;
+            PickNewPatrolDirection(forceAnchorBias: true);
+        }
+
+        void MarkMovementProgress()
+        {
+            MarkMovementProgress(m_Rigidbody != null ? m_Rigidbody.position : transform.position);
+        }
+
+        void MarkMovementProgress(Vector3 currentPosition)
+        {
+            m_LastProgressPosition = currentPosition;
+            m_LastProgressAt = Time.time;
+        }
+
         bool ShouldUseLocalNavigation(Vector2Int currentCell, Vector2Int targetCell, Vector3 targetWorldPosition, Transform ignoreRoot = null)
         {
+            if (CanUseGridNavigation && !m_GridNavigator.TryFindPath(currentCell, targetCell, m_GridReachabilityPath))
+                return false;
+
             int allowedModuleDistance = Mathf.Max(1, m_ClosePursuitModuleDistance);
             int moduleDistance = GetGridDistance(currentCell, targetCell);
             if (moduleDistance > allowedModuleDistance)
@@ -1302,10 +1509,10 @@ namespace CIS5680VRGame.Gameplay
                 if (hitCollider == null || hitCollider.isTrigger)
                     continue;
 
-                Transform hitRoot = hitCollider.transform.root;
-                if (hitRoot == transform)
+                if (IsOwnCollider(hitCollider))
                     continue;
 
+                Transform hitRoot = hitCollider.transform.root;
                 if (ignoreRoot != null && hitRoot == ignoreRoot)
                     continue;
 
@@ -1911,10 +2118,10 @@ namespace CIS5680VRGame.Gameplay
                 if (hitCollider == null)
                     continue;
 
-                Transform hitRoot = hitCollider.transform.root;
-                if (hitRoot == transform)
+                if (IsOwnCollider(hitCollider))
                     continue;
 
+                Transform hitRoot = hitCollider.transform.root;
                 if (ignoreRoot != null && hitRoot == ignoreRoot)
                     continue;
 
@@ -1929,6 +2136,15 @@ namespace CIS5680VRGame.Gameplay
             }
 
             return blocked;
+        }
+
+        bool IsOwnCollider(Collider candidate)
+        {
+            if (candidate == null)
+                return false;
+
+            Transform candidateTransform = candidate.transform;
+            return candidateTransform == transform || candidateTransform.IsChildOf(transform);
         }
 
         Vector3 GetSmoothedMoveDirection(Vector3 desiredDirection)

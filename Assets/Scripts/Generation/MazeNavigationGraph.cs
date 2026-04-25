@@ -266,6 +266,9 @@ namespace CIS5680VRGame.Generation
                 for (int i = 0; i < edges.Count; i++)
                 {
                     MazeNavigationEdge edge = edges[i];
+                    if (!IsNavigationEdgeTraversable(edge))
+                        continue;
+
                     int neighborId = edge.ToNodeId;
                     if (m_ClosedSet.Contains(neighborId))
                         continue;
@@ -373,6 +376,9 @@ namespace CIS5680VRGame.Generation
                 for (int j = 0; j < edges.Count; j++)
                 {
                     MazeNavigationEdge edge = edges[j];
+                    if (!IsNavigationEdgeTraversable(edge))
+                        continue;
+
                     if (!m_NodesById.TryGetValue(edge.ToNodeId, out MazeNavigationNode neighborNode))
                         continue;
 
@@ -778,6 +784,27 @@ namespace CIS5680VRGame.Generation
             }
 
             adjacency.Add(edge);
+        }
+
+        bool IsNavigationEdgeTraversable(MazeNavigationEdge edge)
+        {
+            if (edge == null || m_Bootstrap == null)
+                return edge != null;
+
+            if (!m_NodesById.TryGetValue(edge.FromNodeId, out MazeNavigationNode fromNode)
+                || !m_NodesById.TryGetValue(edge.ToNodeId, out MazeNavigationNode toNode))
+            {
+                return false;
+            }
+
+            if (fromNode.GridPosition == toNode.GridPosition || fromNode.Connection == MazeCellConnection.None)
+                return true;
+
+            Vector2Int expectedNeighborPosition = fromNode.GridPosition + ResolveDirection(fromNode.Connection);
+            if (expectedNeighborPosition != toNode.GridPosition)
+                return true;
+
+            return m_Bootstrap.IsMazeConnectionTraversable(fromNode.GridPosition, fromNode.Connection);
         }
 
         Vector3 ResolvePortalWorldPosition(Vector2Int gridPosition, Vector2Int direction)

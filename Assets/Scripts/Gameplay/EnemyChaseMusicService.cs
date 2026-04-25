@@ -62,7 +62,7 @@ namespace CIS5680VRGame.Gameplay
             EnsureAudioSource();
 
             bool canPlayChaseMusic = m_ChaseClip != null;
-            bool shouldPlayChaseMusic = canPlayChaseMusic && EnemyPatrolController.HasAlertedEnemy();
+            bool shouldPlayChaseMusic = canPlayChaseMusic && EnemyPatrolController.HasChasingEnemy();
 
             UpdateAmbientDuck(shouldPlayChaseMusic);
             UpdateMusicPlayback(shouldPlayChaseMusic);

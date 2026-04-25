@@ -14,6 +14,7 @@ public class PulseManager : MonoBehaviour
     }
 
     public static PulseManager Instance { get; private set; }
+    public static event System.Action<Vector3, Vector3, float, Collider> PulseSpawned;
     float m_BaseRevealHoldDuration;
     float m_PersistentRevealHoldDurationBonusSeconds;
     int m_SingleRunRevealHoldDurationBonusPercent;
@@ -176,6 +177,8 @@ public class PulseManager : MonoBehaviour
             sourceBoundsExtents = sourceBounds.extents,
             constrainToSourceSurface = constrainToSourceSurface
         });
+
+        PulseSpawned?.Invoke(origin, normal, maxRadius, sourceCollider);
     }
 
     public void AddGlowPoint(Vector3 position, float radius = 0.5f)

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using CIS5680VRGame.Balls;
 using CIS5680VRGame.Gameplay;
+using UnityEngine.XR.Interaction.Toolkit.Interactables;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -13,9 +14,17 @@ namespace CIS5680VRGame.Generation
     {
         static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
         static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
+        static readonly Vector2Int[] HiddenDoorSecurityDirections =
+        {
+            Vector2Int.up,
+            Vector2Int.right,
+            Vector2Int.down,
+            Vector2Int.left,
+        };
         const string GrayboxRootName = "GrayboxMaze";
         const string FloorsRootName = "Floors";
         const string WallsRootName = "Walls";
+        const string HiddenDoorsRootName = "HiddenDoors";
         const string MarkersRootName = "Markers";
         const string StartRootName = "Start";
         const string SupportRootName = "Support";
@@ -30,7 +39,16 @@ namespace CIS5680VRGame.Generation
         const string DefaultRobotScoutEnemyPrefabPath = "Assets/Prefabs/Enemies/RobotScoutEnemy.prefab";
         const string DefaultRenderSkinMeshAssetPath = "Assets/Generated/Maze/RandomMazeRenderSkin.asset";
         const string DefaultRenderSkinMaterialAssetPath = "Assets/Generated/Maze/M_RandomMazeRenderSkinPulse.mat";
+        const string HiddenDoorPulseHitClipResourcePath = "Audio/Gameplay/HiddenDoor/pulse_hit_hidden_wall";
+        const string HiddenDoorTriggeredClipResourcePath = "Audio/Gameplay/HiddenDoor/triggered";
+        const string HiddenDoorOpenedClipResourcePath = "Audio/Gameplay/HiddenDoor/door_open";
+        const string HiddenDoorProgressResetClipResourcePath = "Audio/Gameplay/HiddenDoor/reset_progress";
         const string GroundLayerName = "Ground";
+
+        static AudioClip s_DefaultHiddenDoorPulseHitClip;
+        static AudioClip s_DefaultHiddenDoorTriggeredClip;
+        static AudioClip s_DefaultHiddenDoorOpenedClip;
+        static AudioClip s_DefaultHiddenDoorProgressResetClip;
 
         [Header("Placement")]
         [SerializeField] bool m_AlignStartToAnchor = true;
@@ -71,6 +89,24 @@ namespace CIS5680VRGame.Generation
         [SerializeField, Min(1)] int m_DefaultRewardAmount = 1;
         [SerializeField, Min(0.05f)] float m_RewardTriggerRadius = 0.7f;
 
+        [Header("Resonance Hidden Doors")]
+        [SerializeField, Min(1)] int m_HiddenDoorRequiredPulseHits = 3;
+        [SerializeField, Min(0f)] float m_HiddenDoorProgressResetDelay = 12f;
+        [SerializeField, Min(0.05f)] float m_HiddenDoorInteractionPointDiameter = 0.34f;
+        [SerializeField, Min(0f)] float m_HiddenDoorSideInset = 0.08f;
+        [SerializeField, Min(0f)] float m_HiddenDoorDepthBias = 0.035f;
+        [SerializeField] Color m_HiddenDoorInteractionPointColor = new(1f, 0.78f, 0.18f, 1f);
+        [SerializeField] Color m_HiddenDoorInteractionPlateColor = new(0.01f, 0.018f, 0.02f, 1f);
+        [SerializeField] Color m_HiddenDoorInteractionAccentColor = new(0.08f, 0.8f, 1f, 1f);
+        [SerializeField, Min(0.15f)] float m_HiddenDoorInteractionPlateWidth = 0.56f;
+        [SerializeField, Min(0.25f)] float m_HiddenDoorInteractionPlateHeight = 1.05f;
+        [SerializeField, Min(0.02f)] float m_HiddenDoorInteractionDepth = 0.12f;
+        [SerializeField] Material m_HiddenDoorInteractionPointMaterial;
+        [SerializeField] AudioClip m_HiddenDoorPulseHitClip;
+        [SerializeField] AudioClip m_HiddenDoorTriggeredClip;
+        [SerializeField] AudioClip m_HiddenDoorOpenedClip;
+        [SerializeField] AudioClip m_HiddenDoorProgressResetClip;
+
         [Header("Enemy Prototype")]
         [SerializeField] GameObject m_RobotScoutEnemyPrefab;
         [SerializeField] Vector3 m_EnemyLocalOffset = Vector3.zero;
@@ -83,6 +119,7 @@ namespace CIS5680VRGame.Generation
 
         Vector3 m_LastResolvedOrigin;
         bool m_HasResolvedOrigin;
+        Material m_RuntimeHiddenDoorInteractionPointMaterial;
         readonly Dictionary<Vector2Int, MazePlacedModuleNavigationData> m_PlacedNavigationModules = new();
 
         public float CellSize => m_CellSize;
@@ -110,12 +147,14 @@ namespace CIS5680VRGame.Generation
             Transform floorsRoot = EnsureChild(grayboxRoot, FloorsRootName);
             Transform wallsRoot = EnsureChild(grayboxRoot, WallsRootName);
             Transform supportRoot = EnsureChild(grayboxRoot, SupportRootName);
+            Transform hiddenDoorsRoot = EnsureChild(bootstrap.ModulesRoot, HiddenDoorsRootName);
             Transform markersRoot = EnsureChild(bootstrap.ModulesRoot, MarkersRootName);
             Transform startRoot = EnsureChild(bootstrap.ModulesRoot, StartRootName);
 
             ClearChildren(floorsRoot);
             ClearChildren(wallsRoot);
             ClearChildren(supportRoot);
+            ClearChildren(hiddenDoorsRoot);
             ClearChildren(markersRoot);
             ClearChildren(startRoot);
             ClearChildren(bootstrap.HazardsRoot);
@@ -131,6 +170,7 @@ namespace CIS5680VRGame.Generation
                 MazeCellData cell = layout.Cells[i];
                 CreateFloor(floorsRoot, cell);
                 BuildCellWalls(wallsRoot, layout, cell);
+                BuildCellHiddenDoors(hiddenDoorsRoot, layout, bootstrap, cell);
                 GameObject placedSpecialObject = PlaceSpecialObject(bootstrap, startRoot, cell);
                 RegisterPlacedModuleNavigation(cell, placedSpecialObject);
 
@@ -224,7 +264,8 @@ namespace CIS5680VRGame.Generation
             }
 
             bool isBoundaryWall = !hasNeighbor;
-            float wallHeight = ResolveWallHeight(isBoundaryWall);
+            bool useHiddenDoorSecurityHeight = !isBoundaryWall && ShouldUseHiddenDoorSecurityWallHeight(layout, cell, neighborPosition);
+            float wallHeight = ResolveWallHeight(isBoundaryWall || useHiddenDoorSecurityHeight);
 
             GameObject wallObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
             wallObject.name = $"Wall_{cell.GridPosition.x}_{cell.GridPosition.y}_{connectionFlag}";
@@ -235,6 +276,349 @@ namespace CIS5680VRGame.Generation
             Renderer wallRenderer = wallObject.GetComponent<Renderer>();
             if (wallRenderer != null)
                 wallRenderer.sharedMaterial = ResolveWallMaterial();
+        }
+
+        bool ShouldUseHiddenDoorSecurityWallHeight(MazeLayout layout, MazeCellData cell, Vector2Int neighborPosition)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            if (IsInHiddenDoorSecurityZone(layout, cell))
+                return true;
+
+            return layout.TryGetCell(neighborPosition, out MazeCellData neighbor)
+                && IsInHiddenDoorSecurityZone(layout, neighbor);
+        }
+
+        bool IsInHiddenDoorSecurityZone(MazeLayout layout, MazeCellData cell)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            if (TouchesHiddenDoorConnection(layout, cell))
+                return true;
+
+            for (int i = 0; i < HiddenDoorSecurityDirections.Length; i++)
+            {
+                if (!layout.TryGetCell(cell.GridPosition + HiddenDoorSecurityDirections[i], out MazeCellData neighbor))
+                    continue;
+
+                if (TouchesHiddenDoorConnection(layout, neighbor))
+                    return true;
+            }
+
+            return false;
+        }
+
+        bool TouchesHiddenDoorConnection(MazeLayout layout, MazeCellData cell)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            if (cell.HiddenDoorConnections != MazeCellConnection.None)
+                return true;
+
+            for (int i = 0; i < HiddenDoorSecurityDirections.Length; i++)
+            {
+                Vector2Int neighborPosition = cell.GridPosition + HiddenDoorSecurityDirections[i];
+                if (!layout.TryGetCell(neighborPosition, out MazeCellData neighbor) || neighbor == null)
+                    continue;
+
+                MazeCellConnection neighborConnectionToCell = MazeLayout.ResolveConnectionFlag(neighbor.GridPosition, cell.GridPosition);
+                if (neighbor.HiddenDoorConnections.HasFlag(neighborConnectionToCell))
+                    return true;
+            }
+
+            return false;
+        }
+
+        void BuildCellHiddenDoors(Transform parent, MazeLayout layout, MazeRunBootstrap bootstrap, MazeCellData cell)
+        {
+            if (parent == null || layout == null || cell == null || cell.HiddenDoorConnections == MazeCellConnection.None)
+                return;
+
+            TryCreateHiddenDoor(parent, layout, bootstrap, cell, MazeCellConnection.North, Vector2Int.up);
+            TryCreateHiddenDoor(parent, layout, bootstrap, cell, MazeCellConnection.East, Vector2Int.right);
+            TryCreateHiddenDoor(parent, layout, bootstrap, cell, MazeCellConnection.South, Vector2Int.down);
+            TryCreateHiddenDoor(parent, layout, bootstrap, cell, MazeCellConnection.West, Vector2Int.left);
+        }
+
+        void TryCreateHiddenDoor(
+            Transform parent,
+            MazeLayout layout,
+            MazeRunBootstrap bootstrap,
+            MazeCellData cell,
+            MazeCellConnection connectionFlag,
+            Vector2Int direction)
+        {
+            if (!cell.HiddenDoorConnections.HasFlag(connectionFlag) || !cell.Connections.HasFlag(connectionFlag))
+                return;
+
+            if (!layout.TryGetCell(cell.GridPosition + direction, out _))
+                return;
+
+            float wallHeight = ResolveWallHeight(isBoundaryWall: true);
+            GameObject doorObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            doorObject.name = $"ResonanceHiddenDoor_{cell.GridPosition.x}_{cell.GridPosition.y}_{connectionFlag}";
+            doorObject.transform.SetParent(parent, false);
+            doorObject.transform.position = ResolveHiddenDoorWorldPosition(cell.GridPosition, direction, wallHeight);
+            doorObject.transform.localScale = ResolveHiddenDoorScale(direction, wallHeight);
+
+            Collider blockingCollider = doorObject.GetComponent<Collider>();
+            if (blockingCollider != null)
+                blockingCollider.isTrigger = false;
+
+            Renderer doorRenderer = doorObject.GetComponent<Renderer>();
+            if (doorRenderer != null)
+                doorRenderer.sharedMaterial = ResolveWallMaterial();
+
+            Renderer[] unstableSurfaceRenderers = doorRenderer != null
+                ? new[] { doorRenderer }
+                : System.Array.Empty<Renderer>();
+
+            Transform interactionPointRoot = CreateHiddenDoorInteractionPoint(doorObject.transform, direction, wallHeight);
+            Renderer[] interactionPointRenderers = interactionPointRoot != null
+                ? interactionPointRoot.GetComponentsInChildren<Renderer>(true)
+                : System.Array.Empty<Renderer>();
+            Collider interactionCollider = interactionPointRoot != null
+                ? interactionPointRoot.GetComponent<Collider>()
+                : null;
+
+            AttachPulseRevealVisual(
+                doorObject,
+                new Color(0f, 0f, 0f, 1f),
+                new Color(0.16f, 0.9f, 1f, 1f),
+                2.5f);
+
+            XRSimpleInteractable interactable = doorObject.GetComponent<XRSimpleInteractable>();
+            if (interactable == null)
+                interactable = doorObject.AddComponent<XRSimpleInteractable>();
+            if (interactable != null)
+            {
+                interactable.colliders.Clear();
+                if (interactionCollider != null)
+                    interactable.colliders.Add(interactionCollider);
+            }
+
+            var hiddenDoor = doorObject.GetComponent<ResonanceHiddenDoor>();
+            if (hiddenDoor == null)
+                hiddenDoor = doorObject.AddComponent<ResonanceHiddenDoor>();
+
+            hiddenDoor.ConfigureGeneratedDoor(
+                doorObject.transform,
+                blockingCollider,
+                interactionPointRoot,
+                unstableSurfaceRenderers,
+                interactionPointRenderers,
+                Vector3.up * (wallHeight + 0.35f),
+                m_HiddenDoorRequiredPulseHits,
+                m_HiddenDoorProgressResetDelay,
+                ResolveHiddenDoorPulseHitClip(),
+                ResolveHiddenDoorTriggeredClip(),
+                ResolveHiddenDoorOpenedClip(),
+                ResolveHiddenDoorProgressResetClip());
+            hiddenDoor.ConfigureNavigationState(bootstrap, cell.GridPosition, connectionFlag);
+
+            if (interactable != null)
+                interactable.enabled = false;
+        }
+
+        Transform CreateHiddenDoorInteractionPoint(Transform doorTransform, Vector2Int direction, float wallHeight)
+        {
+            if (doorTransform == null)
+                return null;
+
+            GameObject pointObject = new("InteractionPoint");
+            pointObject.name = "InteractionPoint";
+            pointObject.transform.SetParent(doorTransform, false);
+            pointObject.transform.localPosition = Vector3.zero;
+            pointObject.transform.localRotation = Quaternion.identity;
+            pointObject.transform.localScale = Vector3.one;
+
+            float plateWidth = Mathf.Max(0.15f, m_HiddenDoorInteractionPlateWidth);
+            float plateHeight = Mathf.Max(0.25f, m_HiddenDoorInteractionPlateHeight);
+            float hitboxWidth = Mathf.Max(plateWidth, m_HiddenDoorInteractionPointDiameter * 1.35f);
+            float hitboxHeight = Mathf.Max(plateHeight, m_HiddenDoorInteractionPointDiameter * 2.5f);
+            float hitboxDepth = Mathf.Max(0.02f, m_HiddenDoorInteractionDepth);
+            Vector2 centerOffset = new(0f, ResolveHiddenDoorInteractionPointHeightOffset(wallHeight));
+
+            BoxCollider pointCollider = pointObject.AddComponent<BoxCollider>();
+            pointCollider.isTrigger = true;
+            ApplyHiddenDoorFaceCollider(
+                pointCollider,
+                doorTransform,
+                direction,
+                centerOffset,
+                new Vector2(hitboxWidth, hitboxHeight),
+                hitboxDepth);
+
+            CreateHiddenDoorLatchPiece(
+                pointObject.transform,
+                doorTransform,
+                direction,
+                "RecessedBackplate",
+                centerOffset,
+                new Vector2(plateWidth, plateHeight),
+                hitboxDepth * 0.32f,
+                m_HiddenDoorInteractionPlateColor);
+
+            CreateHiddenDoorLatchPiece(
+                pointObject.transform,
+                doorTransform,
+                direction,
+                "VerticalGrip",
+                centerOffset + new Vector2(0f, -plateHeight * 0.02f),
+                new Vector2(plateWidth * 0.2f, plateHeight * 0.68f),
+                hitboxDepth * 0.58f,
+                m_HiddenDoorInteractionPointColor);
+
+            CreateHiddenDoorLatchPiece(
+                pointObject.transform,
+                doorTransform,
+                direction,
+                "TopGripBracket",
+                centerOffset + new Vector2(0f, plateHeight * 0.38f),
+                new Vector2(plateWidth * 0.58f, plateHeight * 0.055f),
+                hitboxDepth * 0.55f,
+                m_HiddenDoorInteractionPointColor);
+
+            CreateHiddenDoorLatchPiece(
+                pointObject.transform,
+                doorTransform,
+                direction,
+                "BottomGripBracket",
+                centerOffset + new Vector2(0f, -plateHeight * 0.42f),
+                new Vector2(plateWidth * 0.58f, plateHeight * 0.055f),
+                hitboxDepth * 0.55f,
+                m_HiddenDoorInteractionPointColor);
+
+            CreateHiddenDoorLatchPiece(
+                pointObject.transform,
+                doorTransform,
+                direction,
+                "LeftStatusEdge",
+                centerOffset + new Vector2(-plateWidth * 0.43f, 0f),
+                new Vector2(plateWidth * 0.045f, plateHeight * 0.72f),
+                hitboxDepth * 0.42f,
+                m_HiddenDoorInteractionAccentColor);
+
+            CreateHiddenDoorLatchPiece(
+                pointObject.transform,
+                doorTransform,
+                direction,
+                "RightStatusEdge",
+                centerOffset + new Vector2(plateWidth * 0.43f, 0f),
+                new Vector2(plateWidth * 0.045f, plateHeight * 0.72f),
+                hitboxDepth * 0.42f,
+                m_HiddenDoorInteractionAccentColor);
+
+            pointObject.SetActive(false);
+            return pointObject.transform;
+        }
+
+        void CreateHiddenDoorLatchPiece(
+            Transform root,
+            Transform doorTransform,
+            Vector2Int direction,
+            string pieceName,
+            Vector2 faceOffset,
+            Vector2 faceSize,
+            float depth,
+            Color color)
+        {
+            if (root == null || doorTransform == null)
+                return;
+
+            GameObject piece = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            piece.name = pieceName;
+            piece.transform.SetParent(root, false);
+            ApplyHiddenDoorFaceTransform(piece.transform, doorTransform, direction, faceOffset, faceSize, depth);
+
+            Collider pieceCollider = piece.GetComponent<Collider>();
+            if (pieceCollider != null)
+                pieceCollider.enabled = false;
+
+            Renderer pieceRenderer = piece.GetComponent<Renderer>();
+            if (pieceRenderer != null)
+            {
+                pieceRenderer.sharedMaterial = ResolveHiddenDoorInteractionPointMaterial();
+                ApplyRendererMaterialAndColor(pieceRenderer, null, color);
+            }
+        }
+
+        float ResolveHiddenDoorInteractionPointHeightOffset(float wallHeight)
+        {
+            float doorCenterHeight = wallHeight * 0.5f - m_FloorThickness * 0.5f;
+            return Mathf.Clamp(1.45f - doorCenterHeight, -wallHeight * 0.42f, wallHeight * 0.08f);
+        }
+
+        void ApplyHiddenDoorFaceCollider(
+            BoxCollider target,
+            Transform doorTransform,
+            Vector2Int direction,
+            Vector2 faceOffset,
+            Vector2 faceSize,
+            float depth)
+        {
+            if (target == null || doorTransform == null)
+                return;
+
+            Vector3 parentScale = doorTransform.localScale;
+            float safeDepth = Mathf.Max(0.005f, depth);
+            bool northSouth = direction.y != 0;
+            Vector3 desiredLocalOffset;
+            Vector3 desiredWorldSize;
+
+            if (northSouth)
+            {
+                float faceDepthOffset = parentScale.z * 0.5f + safeDepth * 0.5f + 0.012f;
+                desiredLocalOffset = new Vector3(faceOffset.x, faceOffset.y, Mathf.Sign(direction.y) * faceDepthOffset);
+                desiredWorldSize = new Vector3(Mathf.Max(0.01f, faceSize.x), Mathf.Max(0.01f, faceSize.y), safeDepth);
+            }
+            else
+            {
+                float faceDepthOffset = parentScale.x * 0.5f + safeDepth * 0.5f + 0.012f;
+                desiredLocalOffset = new Vector3(Mathf.Sign(direction.x) * faceDepthOffset, faceOffset.y, faceOffset.x);
+                desiredWorldSize = new Vector3(safeDepth, Mathf.Max(0.01f, faceSize.y), Mathf.Max(0.01f, faceSize.x));
+            }
+
+            target.center = DivideByScale(desiredLocalOffset, parentScale);
+            target.size = DivideByScale(desiredWorldSize, parentScale);
+        }
+
+        void ApplyHiddenDoorFaceTransform(
+            Transform target,
+            Transform doorTransform,
+            Vector2Int direction,
+            Vector2 faceOffset,
+            Vector2 faceSize,
+            float depth)
+        {
+            if (target == null || doorTransform == null)
+                return;
+
+            Vector3 parentScale = doorTransform.localScale;
+            float safeDepth = Mathf.Max(0.005f, depth);
+            bool northSouth = direction.y != 0;
+            Vector3 desiredLocalOffset;
+            Vector3 desiredWorldSize;
+
+            if (northSouth)
+            {
+                float faceDepthOffset = parentScale.z * 0.5f + safeDepth * 0.5f + 0.006f;
+                desiredLocalOffset = new Vector3(faceOffset.x, faceOffset.y, Mathf.Sign(direction.y) * faceDepthOffset);
+                desiredWorldSize = new Vector3(Mathf.Max(0.01f, faceSize.x), Mathf.Max(0.01f, faceSize.y), safeDepth);
+            }
+            else
+            {
+                float faceDepthOffset = parentScale.x * 0.5f + safeDepth * 0.5f + 0.006f;
+                desiredLocalOffset = new Vector3(Mathf.Sign(direction.x) * faceDepthOffset, faceOffset.y, faceOffset.x);
+                desiredWorldSize = new Vector3(safeDepth, Mathf.Max(0.01f, faceSize.y), Mathf.Max(0.01f, faceSize.x));
+            }
+
+            target.localPosition = DivideByScale(desiredLocalOffset, parentScale);
+            target.localRotation = Quaternion.identity;
+            target.localScale = DivideByScale(desiredWorldSize, parentScale);
         }
 
         GameObject PlaceSpecialObject(MazeRunBootstrap bootstrap, Transform startRoot, MazeCellData cell)
@@ -324,42 +708,98 @@ namespace CIS5680VRGame.Generation
             RewardPickup pickup = rewardRoot.AddComponent<RewardPickup>();
             pickup.Configure(RunRewardType.Coin, m_DefaultRewardAmount);
 
-            GameObject crystal = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            crystal.name = "Crystal";
-            crystal.transform.SetParent(rewardRoot.transform, false);
-            crystal.transform.localPosition = Vector3.zero;
-            crystal.transform.localRotation = Quaternion.Euler(45f, 0f, 45f);
-            crystal.transform.localScale = m_RewardPlaceholderScale;
-
-            Collider crystalCollider = crystal.GetComponent<Collider>();
-            if (crystalCollider != null)
-                DestroyImmediateOrRuntime(crystalCollider);
-
-            Renderer crystalRenderer = crystal.GetComponent<Renderer>();
-            if (crystalRenderer != null)
-                ApplyRendererMaterialAndColor(crystalRenderer, m_FloorRevealMaterial, new Color(1f, 0.76f, 0.14f, 1f));
-
-            GameObject core = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            core.name = "Core";
-            core.transform.SetParent(rewardRoot.transform, false);
-            core.transform.localPosition = Vector3.zero;
-            core.transform.localScale = m_RewardPlaceholderScale * 0.42f;
-
-            Collider coreCollider = core.GetComponent<Collider>();
-            if (coreCollider != null)
-                DestroyImmediateOrRuntime(coreCollider);
-
-            Renderer coreRenderer = core.GetComponent<Renderer>();
-            if (coreRenderer != null)
-                ApplyRendererMaterialAndColor(coreRenderer, m_FloorRevealMaterial, new Color(1f, 0.95f, 0.68f, 1f));
+            CreateCoinVisual(rewardRoot.transform);
 
             AttachPulseRevealVisual(
                 rewardRoot,
-                new Color(0.14f, 0.09f, 0.02f, 1f),
-                new Color(1f, 0.78f, 0.18f, 1f),
+                new Color(0.08f, 0.048f, 0.005f, 1f),
+                new Color(1f, 0.84f, 0.18f, 1f),
                 3f);
 
             return rewardRoot;
+        }
+
+        void CreateCoinVisual(Transform parent)
+        {
+            float diameter = Mathf.Max(
+                0.48f,
+                Mathf.Max(Mathf.Abs(m_RewardPlaceholderScale.x), Mathf.Abs(m_RewardPlaceholderScale.z)) * 1.45f);
+            float faceDiameter = diameter * 0.78f;
+            float thickness = Mathf.Max(0.08f, Mathf.Abs(m_RewardPlaceholderScale.y) * 0.22f);
+            float faceThickness = Mathf.Max(0.008f, thickness * 0.08f);
+            float faceOffset = thickness * 0.62f;
+
+            CreateCoinCylinder(
+                parent,
+                "CoinRim",
+                diameter,
+                thickness,
+                Vector3.zero,
+                new Color(0.95f, 0.55f, 0.05f, 1f));
+
+            CreateCoinCylinder(
+                parent,
+                "CoinFaceFront",
+                faceDiameter,
+                faceThickness,
+                Vector3.forward * faceOffset,
+                new Color(1f, 0.79f, 0.16f, 1f));
+
+            CreateCoinCylinder(
+                parent,
+                "CoinFaceBack",
+                faceDiameter,
+                faceThickness,
+                Vector3.back * faceOffset,
+                new Color(1f, 0.73f, 0.12f, 1f));
+
+            CreateCoinFaceBars(parent, faceDiameter, faceOffset + faceThickness * 1.2f, true);
+            CreateCoinFaceBars(parent, faceDiameter, -(faceOffset + faceThickness * 1.2f), false);
+        }
+
+        void CreateCoinCylinder(Transform parent, string name, float diameter, float thickness, Vector3 localPosition, Color color)
+        {
+            GameObject piece = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            piece.name = name;
+            piece.transform.SetParent(parent, false);
+            piece.transform.localPosition = localPosition;
+            piece.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            piece.transform.localScale = new Vector3(diameter, thickness * 0.5f, diameter);
+
+            Collider pieceCollider = piece.GetComponent<Collider>();
+            if (pieceCollider != null)
+                DestroyImmediateOrRuntime(pieceCollider);
+
+            Renderer pieceRenderer = piece.GetComponent<Renderer>();
+            if (pieceRenderer != null)
+                ApplyRendererMaterialAndColor(pieceRenderer, m_FloorRevealMaterial, color);
+        }
+
+        void CreateCoinFaceBars(Transform parent, float faceDiameter, float zOffset, bool frontFace)
+        {
+            float barWidth = faceDiameter * 0.58f;
+            float barHeight = faceDiameter * 0.065f;
+            float barDepth = Mathf.Max(0.01f, Mathf.Abs(zOffset) * 0.12f);
+            float verticalSpacing = faceDiameter * 0.16f;
+
+            for (int i = 0; i < 3; i++)
+            {
+                float verticalOffset = (i - 1) * verticalSpacing;
+                GameObject bar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                bar.name = frontFace ? $"CoinFrontMark_{i + 1}" : $"CoinBackMark_{i + 1}";
+                bar.transform.SetParent(parent, false);
+                bar.transform.localPosition = new Vector3(0f, verticalOffset, zOffset);
+                bar.transform.localRotation = Quaternion.identity;
+                bar.transform.localScale = new Vector3(barWidth, barHeight, barDepth);
+
+                Collider barCollider = bar.GetComponent<Collider>();
+                if (barCollider != null)
+                    DestroyImmediateOrRuntime(barCollider);
+
+                Renderer barRenderer = bar.GetComponent<Renderer>();
+                if (barRenderer != null)
+                    ApplyRendererMaterialAndColor(barRenderer, m_FloorRevealMaterial, new Color(1f, 0.94f, 0.48f, 1f));
+            }
         }
 
         void CreateRoleMarker(Transform parent, MazeCellData cell)
@@ -551,6 +991,42 @@ namespace CIS5680VRGame.Generation
                 pulseVisual = target.AddComponent<PulseRevealVisual>();
 
             pulseVisual.SetVisual(backgroundColor, pulseColor, emissionStrength);
+        }
+
+        AudioClip ResolveHiddenDoorPulseHitClip()
+        {
+            return m_HiddenDoorPulseHitClip != null
+                ? m_HiddenDoorPulseHitClip
+                : ResolveHiddenDoorResourceClip(HiddenDoorPulseHitClipResourcePath, ref s_DefaultHiddenDoorPulseHitClip);
+        }
+
+        AudioClip ResolveHiddenDoorTriggeredClip()
+        {
+            return m_HiddenDoorTriggeredClip != null
+                ? m_HiddenDoorTriggeredClip
+                : ResolveHiddenDoorResourceClip(HiddenDoorTriggeredClipResourcePath, ref s_DefaultHiddenDoorTriggeredClip);
+        }
+
+        AudioClip ResolveHiddenDoorOpenedClip()
+        {
+            return m_HiddenDoorOpenedClip != null
+                ? m_HiddenDoorOpenedClip
+                : ResolveHiddenDoorResourceClip(HiddenDoorOpenedClipResourcePath, ref s_DefaultHiddenDoorOpenedClip);
+        }
+
+        AudioClip ResolveHiddenDoorProgressResetClip()
+        {
+            return m_HiddenDoorProgressResetClip != null
+                ? m_HiddenDoorProgressResetClip
+                : ResolveHiddenDoorResourceClip(HiddenDoorProgressResetClipResourcePath, ref s_DefaultHiddenDoorProgressResetClip);
+        }
+
+        static AudioClip ResolveHiddenDoorResourceClip(string resourcePath, ref AudioClip cachedClip)
+        {
+            if (cachedClip == null && !string.IsNullOrWhiteSpace(resourcePath))
+                cachedClip = Resources.Load<AudioClip>(resourcePath);
+
+            return cachedClip;
         }
 
         void PlacePrototypeEnemies(MazeLayout layout, MazeRunBootstrap bootstrap)
@@ -913,6 +1389,29 @@ namespace CIS5680VRGame.Generation
                 : new Vector3(m_WallThickness, wallHeight, m_CellSize + m_WallThickness);
         }
 
+        Vector3 ResolveHiddenDoorWorldPosition(Vector2Int gridPosition, Vector2Int direction, float wallHeight)
+        {
+            Vector3 wallPosition = ResolveWallWorldPosition(gridPosition, direction, wallHeight);
+            Vector3 wallNormal = new(direction.x, 0f, direction.y);
+            float depthBias = Mathf.Min(Mathf.Max(0f, m_HiddenDoorDepthBias), Mathf.Max(0.001f, m_WallThickness) * 0.25f);
+            return wallPosition - wallNormal * depthBias;
+        }
+
+        Vector3 ResolveHiddenDoorScale(Vector2Int direction, float wallHeight)
+        {
+            Vector3 scale = ResolveWallScale(direction, wallHeight);
+            float sideInset = Mathf.Min(
+                Mathf.Max(0f, m_HiddenDoorSideInset),
+                Mathf.Max(0f, (m_CellSize - m_WallThickness) * 0.45f));
+
+            if (direction.y != 0)
+                scale.x = Mathf.Max(m_WallThickness, scale.x - sideInset * 2f);
+            else
+                scale.z = Mathf.Max(m_WallThickness, scale.z - sideInset * 2f);
+
+            return scale;
+        }
+
         void CreateSupportSlab(Transform parent, MazeLayout layout)
         {
             if (parent == null || layout == null || layout.Cells.Count == 0)
@@ -1052,6 +1551,42 @@ namespace CIS5680VRGame.Generation
             return m_WallRevealMaterial != null ? m_WallRevealMaterial : m_EditorPreviewWallMaterial;
         }
 
+        Material ResolveHiddenDoorInteractionPointMaterial()
+        {
+            if (m_HiddenDoorInteractionPointMaterial != null)
+                return m_HiddenDoorInteractionPointMaterial;
+
+            if (m_RuntimeHiddenDoorInteractionPointMaterial != null)
+                return m_RuntimeHiddenDoorInteractionPointMaterial;
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+                shader = Shader.Find("Unlit/Color");
+            if (shader == null)
+                shader = Shader.Find("Standard");
+
+            if (shader == null)
+                return ResolveWallMaterial();
+
+            m_RuntimeHiddenDoorInteractionPointMaterial = new Material(shader)
+            {
+                name = "GeneratedHiddenDoorInteractionPointMaterial",
+            };
+            ApplyMaterialColor(m_RuntimeHiddenDoorInteractionPointMaterial, m_HiddenDoorInteractionPointColor);
+            return m_RuntimeHiddenDoorInteractionPointMaterial;
+        }
+
+        static void ApplyMaterialColor(Material material, Color color)
+        {
+            if (material == null)
+                return;
+
+            if (material.HasProperty(BaseColorPropertyId))
+                material.SetColor(BaseColorPropertyId, color);
+            if (material.HasProperty(ColorPropertyId))
+                material.SetColor(ColorPropertyId, color);
+        }
+
         void EnsureGeneratedPreviewTools(Transform grayboxRoot, Transform floorsRoot)
         {
             if (grayboxRoot == null)
@@ -1089,6 +1624,19 @@ namespace CIS5680VRGame.Generation
                 DefaultRenderSkinMeshAssetPath,
                 DefaultRenderSkinMaterialAssetPath);
             builder.BuildRuntimeRenderSkin();
+        }
+
+        static Vector3 DivideByScale(Vector3 value, Vector3 scale)
+        {
+            return new Vector3(
+                DivideByScaleComponent(value.x, scale.x),
+                DivideByScaleComponent(value.y, scale.y),
+                DivideByScaleComponent(value.z, scale.z));
+        }
+
+        static float DivideByScaleComponent(float value, float scale)
+        {
+            return Mathf.Abs(scale) > 0.0001f ? value / scale : value;
         }
 
         static Transform EnsureChild(Transform parent, string childName)

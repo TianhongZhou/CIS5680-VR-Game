@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -19,6 +20,50 @@ namespace CIS5680VRGame.Generation
         const int MaxSupportedMazeSize = 200;
         const int MaxBatchSeedTestCount = 10000;
         const string DefaultParameterExportRelativeFolderPath = "Local Docs/Exported Random Maze Parameters";
+
+        readonly struct MazeConnectionKey : System.IEquatable<MazeConnectionKey>
+        {
+            public MazeConnectionKey(Vector2Int a, Vector2Int b)
+            {
+                if (CompareGridPositions(a, b) <= 0)
+                {
+                    A = a;
+                    B = b;
+                }
+                else
+                {
+                    A = b;
+                    B = a;
+                }
+            }
+
+            public Vector2Int A { get; }
+            public Vector2Int B { get; }
+
+            public bool Equals(MazeConnectionKey other)
+            {
+                return A == other.A && B == other.B;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is MazeConnectionKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    return (A.GetHashCode() * 397) ^ B.GetHashCode();
+                }
+            }
+
+            static int CompareGridPositions(Vector2Int left, Vector2Int right)
+            {
+                int xComparison = left.x.CompareTo(right.x);
+                return xComparison != 0 ? xComparison : left.y.CompareTo(right.y);
+            }
+        }
 
         [Header("Generation Roots")]
         [SerializeField] MazeGenerator m_Generator;
@@ -49,6 +94,7 @@ namespace CIS5680VRGame.Generation
         [SerializeField] int m_HealthRefillCount = 1;
         [SerializeField] int m_TrapCount = 1;
         [SerializeField] int m_RewardCount = 2;
+        [SerializeField] int m_HiddenDoorCount = 1;
 
         [Header("Enemy Prototype")]
         [SerializeField, Min(0)] int m_PrototypeEnemyCount = 1;
@@ -84,7 +130,9 @@ namespace CIS5680VRGame.Generation
         [System.NonSerialized] string m_LastBatchSeedTestSummary = "No batch seed smoke test has been run yet.";
         [System.NonSerialized] string m_LastParameterExportPath = "No parameter export has been created yet.";
         [System.NonSerialized] string m_LastRuntimeProfileSummary = "No runtime random maze profile override applied.";
+        readonly HashSet<MazeConnectionKey> m_OpenHiddenDoorConnections = new();
 
+        public event System.Action HiddenDoorNavigationStateChanged;
         public int CurrentSeed { get; private set; }
         public MazeLayout CurrentLayout { get; private set; }
         public MazeMainPathBuildMode LastGeneratedMainPathBuildMode { get; private set; } = MazeMainPathBuildMode.Normal;
@@ -115,6 +163,7 @@ namespace CIS5680VRGame.Generation
         public int HealthRefillCount => m_HealthRefillCount;
         public int TrapCount => m_TrapCount;
         public int RewardCount => m_RewardCount;
+        public int HiddenDoorCount => m_HiddenDoorCount;
         public int PrototypeEnemyCount => m_PrototypeEnemyCount;
         public int MinSameTypeCellDistance => m_MinSameTypeCellDistance;
         public int MinCrossTypeCellDistance => m_MinCrossTypeCellDistance;
@@ -196,6 +245,8 @@ namespace CIS5680VRGame.Generation
             ClearChildren(m_GoalRoot);
             if (m_NavigationGraph != null)
                 m_NavigationGraph.Clear();
+
+            ClearHiddenDoorNavigationState(notifyChanged: false);
         }
 
         [ContextMenu("Generate Logic Layout")]
@@ -242,6 +293,8 @@ namespace CIS5680VRGame.Generation
                 return;
             }
 
+            ClearHiddenDoorNavigationState(notifyChanged: false);
+
             if (m_ModulePlacer != null)
                 m_ModulePlacer.BuildModules(CurrentLayout, this);
 
@@ -272,6 +325,90 @@ namespace CIS5680VRGame.Generation
             int seed = Random.Range(int.MinValue, int.MaxValue);
             SetFixedSeed(seed);
             return seed;
+        }
+
+        public bool IsMazeConnectionTraversable(MazeCellData cell, MazeCellConnection connection)
+        {
+            if (cell == null || connection == MazeCellConnection.None || !cell.Connections.HasFlag(connection))
+                return false;
+
+            if (!IsHiddenDoorConnection(cell, connection))
+                return true;
+
+            return m_OpenHiddenDoorConnections.Contains(CreateConnectionKey(cell.GridPosition, connection));
+        }
+
+        public bool IsMazeConnectionTraversable(Vector2Int gridPosition, MazeCellConnection connection)
+        {
+            return CurrentLayout != null
+                && CurrentLayout.TryGetCell(gridPosition, out MazeCellData cell)
+                && IsMazeConnectionTraversable(cell, connection);
+        }
+
+        public bool IsHiddenDoorConnection(MazeCellData cell, MazeCellConnection connection)
+        {
+            if (cell == null || connection == MazeCellConnection.None)
+                return false;
+
+            if (cell.HiddenDoorConnections.HasFlag(connection))
+                return true;
+
+            if (CurrentLayout == null)
+                return false;
+
+            Vector2Int neighborPosition = cell.GridPosition + ResolveConnectionDirection(connection);
+            if (!CurrentLayout.TryGetCell(neighborPosition, out MazeCellData neighbor) || neighbor == null)
+                return false;
+
+            MazeCellConnection neighborConnection = MazeLayout.ResolveConnectionFlag(neighbor.GridPosition, cell.GridPosition);
+            return neighbor.HiddenDoorConnections.HasFlag(neighborConnection);
+        }
+
+        public bool SetHiddenDoorConnectionOpen(Vector2Int gridPosition, MazeCellConnection connection)
+        {
+            if (connection == MazeCellConnection.None)
+                return false;
+
+            if (CurrentLayout != null
+                && CurrentLayout.TryGetCell(gridPosition, out MazeCellData cell)
+                && !IsHiddenDoorConnection(cell, connection))
+            {
+                return false;
+            }
+
+            bool changed = m_OpenHiddenDoorConnections.Add(CreateConnectionKey(gridPosition, connection));
+            if (!changed)
+                return false;
+
+            HiddenDoorNavigationStateChanged?.Invoke();
+            return true;
+        }
+
+        void ClearHiddenDoorNavigationState(bool notifyChanged)
+        {
+            if (m_OpenHiddenDoorConnections.Count == 0)
+                return;
+
+            m_OpenHiddenDoorConnections.Clear();
+            if (notifyChanged)
+                HiddenDoorNavigationStateChanged?.Invoke();
+        }
+
+        static MazeConnectionKey CreateConnectionKey(Vector2Int gridPosition, MazeCellConnection connection)
+        {
+            return new MazeConnectionKey(gridPosition, gridPosition + ResolveConnectionDirection(connection));
+        }
+
+        static Vector2Int ResolveConnectionDirection(MazeCellConnection connection)
+        {
+            return connection switch
+            {
+                MazeCellConnection.North => Vector2Int.up,
+                MazeCellConnection.East => Vector2Int.right,
+                MazeCellConnection.South => Vector2Int.down,
+                MazeCellConnection.West => Vector2Int.left,
+                _ => Vector2Int.zero,
+            };
         }
 
         void TryApplyRuntimeProfileOverride()
@@ -337,6 +474,7 @@ namespace CIS5680VRGame.Generation
                 m_HealthRefillCount = Mathf.Max(0, profile.featureCounts.healthRefillCount);
                 m_TrapCount = Mathf.Max(0, profile.featureCounts.trapCount);
                 m_RewardCount = Mathf.Max(0, profile.featureCounts.rewardCount);
+                m_HiddenDoorCount = Mathf.Max(0, profile.featureCounts.hiddenDoorCount);
             }
 
             if (profile.placementRules != null)
@@ -381,7 +519,8 @@ namespace CIS5680VRGame.Generation
                     m_EnergyRefillCount,
                     m_HealthRefillCount,
                     m_TrapCount,
-                    m_RewardCount);
+                    m_RewardCount,
+                    m_HiddenDoorCount);
                 m_Generator.ApplyPlacementRuleProfile(
                     m_MinSameTypeCellDistance,
                     m_MinCrossTypeCellDistance,
@@ -423,6 +562,7 @@ namespace CIS5680VRGame.Generation
             ValidateNonNegative(errors, "Health Refill Count", m_HealthRefillCount);
             ValidateNonNegative(errors, "Trap Count", m_TrapCount);
             ValidateNonNegative(errors, "Reward Count", m_RewardCount);
+            ValidateNonNegative(errors, "Hidden Door Count", m_HiddenDoorCount);
             ValidateNonNegative(errors, "Prototype Enemy Count", m_PrototypeEnemyCount);
             ValidateNonNegative(errors, "Min Same-Type Cell Distance", m_MinSameTypeCellDistance);
             ValidateNonNegative(errors, "Min Cross-Type Cell Distance", m_MinCrossTypeCellDistance);
@@ -447,6 +587,7 @@ namespace CIS5680VRGame.Generation
                 ValidatePerRoleCapacity(errors, "Health Refill Count", m_HealthRefillCount, guaranteedSlots);
                 ValidatePerRoleCapacity(errors, "Trap Count", m_TrapCount, guaranteedSlots);
                 ValidatePerRoleCapacity(errors, "Reward Count", m_RewardCount, guaranteedSlots);
+                ValidatePerRoleCapacity(errors, "Hidden Door Count", m_HiddenDoorCount, guaranteedSlots);
 
                 if (m_MinGoalDistanceFromStart > m_MazeSize * m_MazeSize)
                     errors.Add($"Min Goal Distance From Start cannot exceed the total grid cell budget ({m_MazeSize * m_MazeSize}).");
@@ -568,6 +709,7 @@ namespace CIS5680VRGame.Generation
                     healthRefillCount = m_HealthRefillCount,
                     trapCount = m_TrapCount,
                     rewardCount = m_RewardCount,
+                    hiddenDoorCount = m_HiddenDoorCount,
                 },
                 placementRules = new MazePlacementRuleExport
                 {
@@ -756,7 +898,7 @@ namespace CIS5680VRGame.Generation
             return m_DebugOrigin + new Vector3(gridPosition.x * m_DebugCellSize, 0f, gridPosition.y * m_DebugCellSize);
         }
 
-        static void DestroyImmediateOrRuntime(Object target)
+        static void DestroyImmediateOrRuntime(UnityEngine.Object target)
         {
             if (target == null)
                 return;
@@ -993,6 +1135,7 @@ namespace CIS5680VRGame.Generation
             public int healthRefillCount;
             public int trapCount;
             public int rewardCount;
+            public int hiddenDoorCount;
         }
 
         [System.Serializable]
@@ -1080,7 +1223,7 @@ namespace CIS5680VRGame.Generation
             if (isValid)
             {
                 EditorGUILayout.HelpBox(
-                    $"Inspector values are staged until you press Generate Maze.\nGuaranteed special slot budget: {guaranteedSlots}\nCurrently requested: {totalRequested}",
+                    $"Inspector values are staged until you press Generate Maze.\nGuaranteed role-cell special budget: {guaranteedSlots}\nCurrently requested role cells: {totalRequested}\nRequested hidden doors: {bootstrap.HiddenDoorCount}",
                     MessageType.Info);
             }
             else

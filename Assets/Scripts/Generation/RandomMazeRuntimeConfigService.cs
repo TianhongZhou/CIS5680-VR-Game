@@ -309,6 +309,7 @@ namespace CIS5680VRGame.Generation
         public int healthRefillCount = 1;
         public int trapCount = 1;
         public int rewardCount = 2;
+        public int hiddenDoorCount = 1;
     }
 
     [Serializable]
