@@ -121,6 +121,8 @@ MonoBehaviour:
   m_EyeVerticalLead: 0.12
   m_CorridorCenteringSpeed: 3.1
   m_PathNodeArrivalDistance: 0.4
+  m_StuckProgressDistance: 0.08
+  m_StuckRecoveryDelay: 1.4
 --- !u!1 &589999925825230329
 GameObject:
   m_ObjectHideFlags: 0

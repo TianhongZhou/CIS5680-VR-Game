@@ -33,6 +33,21 @@ namespace CIS5680VRGame.Generation
             Vector2Int.down,
             Vector2Int.left,
         };
+        const int GuidePipelineRecentTurnWindow = 4;
+        const int GuidePipelineImmediateTurnPenalty = 8;
+        const int GuidePipelineRepeatedTurnPenalty = 18;
+        const int GuidePipelineNearTracePenalty = 30;
+        const int GuidePipelineDiagonalTracePenalty = 18;
+        const int GuidePipelineSecondRingTracePenalty = 6;
+        const int GuidePipelineLocalCrowdingPenaltyCap = 90;
+        const int GuidePipelineLaneScoringPasses = 2;
+        const int GuidePipelineLaneDefaultSideBonus = 2;
+        const int GuidePipelineLaneContinuityBonus = 18;
+        const int GuidePipelineLaneSwitchPenalty = 12;
+        const int GuidePipelineLaneNeighborPenalty = 48;
+        const int GuidePipelineLaneSeparatedNeighborPenalty = 8;
+        const int GuidePipelineLaneFacingNeighborPenalty = 24;
+        const int GuidePipelineLaneFarNeighborDiscount = 18;
 
         bool m_EmitDiagnostics = true;
 
@@ -57,6 +72,10 @@ namespace CIS5680VRGame.Generation
         [SerializeField, HideInInspector, Min(0)] int m_TrapCount = 1;
         [SerializeField, HideInInspector, Min(0)] int m_RewardCount = 2;
         [SerializeField, HideInInspector, Min(0)] int m_HiddenDoorCount = 1;
+
+        [Header("Terrain Variants")]
+        [SerializeField, HideInInspector, Min(0)] int m_BeveledCornerCellCount = 6;
+        [SerializeField, HideInInspector, Min(0)] int m_FloorRidgeCellCount = 8;
 
         [Header("Placement Rules")]
         [SerializeField, HideInInspector, Min(0)] int m_MinSameTypeCellDistance = 2;
@@ -118,6 +137,7 @@ namespace CIS5680VRGame.Generation
                 BuildMainPath(layout, mainPath);
                 AddBranches(layout, rng, bounds, mainPath);
                 ApplyCellRoles(layout, rng, mainPath);
+                ApplyTerrainVariants(layout, rng, mainPath);
                 return layout;
             }
             finally
@@ -150,6 +170,13 @@ namespace CIS5680VRGame.Generation
             m_TrapCount = Mathf.Max(0, trapCount);
             m_RewardCount = Mathf.Max(0, rewardCount);
             m_HiddenDoorCount = Mathf.Max(0, hiddenDoorCount);
+            NormalizeSerializedValues();
+        }
+
+        public void ApplyTerrainVariantProfile(int beveledCornerCellCount, int floorRidgeCellCount)
+        {
+            m_BeveledCornerCellCount = Mathf.Max(0, beveledCornerCellCount);
+            m_FloorRidgeCellCount = Mathf.Max(0, floorRidgeCellCount);
             NormalizeSerializedValues();
         }
 
@@ -233,6 +260,8 @@ namespace CIS5680VRGame.Generation
             m_TrapCount = Mathf.Max(0, m_TrapCount);
             m_RewardCount = Mathf.Max(0, m_RewardCount);
             m_HiddenDoorCount = Mathf.Max(0, m_HiddenDoorCount);
+            m_BeveledCornerCellCount = Mathf.Max(0, m_BeveledCornerCellCount);
+            m_FloorRidgeCellCount = Mathf.Max(0, m_FloorRidgeCellCount);
             m_MinSameTypeCellDistance = Mathf.Max(0, m_MinSameTypeCellDistance);
             m_MinCrossTypeCellDistance = Mathf.Max(0, m_MinCrossTypeCellDistance);
             m_StartSafeDistance = Mathf.Max(0, m_StartSafeDistance);
@@ -795,6 +824,8 @@ namespace CIS5680VRGame.Generation
                 else if (i == 1)
                     cell.Role = MazeCellRole.Safe;
 
+                cell.GuidePipelineConnections = MazeCellConnection.None;
+
                 if (i > 0)
                     layout.Connect(mainPath[i - 1], mainPath[i]);
             }
@@ -959,6 +990,997 @@ namespace CIS5680VRGame.Generation
             AssignTraps(layout, rng, mainPath);
             AssignRewards(layout, rng, mainPath);
             AssignHiddenDoors(layout, rng, mainPath);
+        }
+
+        void ApplyTerrainVariants(MazeLayout layout, System.Random rng, List<Vector2Int> mainPath)
+        {
+            if (layout == null || rng == null || mainPath == null || mainPath.Count <= 2)
+                return;
+
+            AssignBeveledCornerTerrain(layout, rng);
+            AssignGuidePipelineTerrain(layout, rng, mainPath);
+        }
+
+        void AssignBeveledCornerTerrain(MazeLayout layout, System.Random rng)
+        {
+            int remaining = m_BeveledCornerCellCount;
+            if (remaining <= 0)
+                return;
+
+            int assigned = AssignTerrainVariantToCandidates(
+                layout,
+                BuildShuffledCandidates(
+                    layout,
+                    rng,
+                    cell => IsBaseTerrainCandidate(layout, cell)
+                        && !cell.IsMainPath
+                        && HasInternalClosedCorner(layout, cell)),
+                MazeCellTerrainVariant.BeveledWallCorners,
+                remaining);
+            remaining -= assigned;
+
+            if (remaining > 0)
+            {
+                assigned += AssignTerrainVariantToCandidates(
+                    layout,
+                    BuildShuffledCandidates(
+                        layout,
+                        rng,
+                        cell => IsBaseTerrainCandidate(layout, cell)
+                            && HasInternalClosedCorner(layout, cell)),
+                    MazeCellTerrainVariant.BeveledWallCorners,
+                    remaining);
+                remaining = m_BeveledCornerCellCount - assigned;
+            }
+
+            WarnIfTerrainPlacementShortfall(
+                MazeCellTerrainVariant.BeveledWallCorners,
+                m_BeveledCornerCellCount,
+                remaining,
+                layout.Seed);
+        }
+
+        void AssignGuidePipelineTerrain(MazeLayout layout, System.Random rng, IReadOnlyList<Vector2Int> mainPath)
+        {
+            if (m_FloorRidgeCellCount <= 0 || layout == null || rng == null || mainPath == null || mainPath.Count < 3)
+                return;
+
+            List<Vector2Int> trace = BuildGuidePipelineTrace(layout, rng, mainPath);
+            int visibleCellCount = AssignGuidePipelineConnections(layout, trace);
+            if (visibleCellCount < Mathf.Min(6, m_FloorRidgeCellCount))
+            {
+                ClearGuidePipelineConnections(layout);
+                visibleCellCount = AssignGuidePipelineConnections(layout, mainPath);
+            }
+
+            LogGuidePipelinePlacement(layout.Seed, visibleCellCount);
+        }
+
+        List<Vector2Int> BuildGuidePipelineTrace(MazeLayout layout, System.Random rng, IReadOnlyList<Vector2Int> mainPath)
+        {
+            List<Vector2Int> fallbackTrace = BuildMainPathGuidePipelineTrace(rng, mainPath);
+            if (layout == null || rng == null || fallbackTrace.Count < 2)
+                return fallbackTrace;
+
+            HashSet<Vector2Int> allowedPositions = BuildGuidePipelineAllowedPositions(layout);
+            if (allowedPositions.Count < 2)
+                return fallbackTrace;
+
+            Vector2Int start = fallbackTrace[0];
+            Vector2Int target = fallbackTrace[fallbackTrace.Count - 1];
+            if (!allowedPositions.Contains(start) || !allowedPositions.Contains(target))
+                return fallbackTrace;
+
+            Dictionary<Vector2Int, int> mainPathIndices = BuildMainPathIndexLookup(mainPath);
+            List<Vector2Int> bestTrace = fallbackTrace;
+            int bestScore = ScoreGuidePipelineTrace(layout, bestTrace, mainPathIndices);
+            int attempts = Mathf.Clamp(layout.Cells.Count * 4, 24, 160);
+            int desiredMinimumCells = Mathf.Min(Mathf.Max(4, m_FloorRidgeCellCount), allowedPositions.Count);
+
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                if (!TryBuildWallCrossingGuidePipelineTrace(
+                    layout,
+                    rng,
+                    allowedPositions,
+                    mainPathIndices,
+                    start,
+                    target,
+                    desiredMinimumCells,
+                    out List<Vector2Int> candidateTrace))
+                {
+                    continue;
+                }
+
+                int candidateScore = ScoreGuidePipelineTrace(layout, candidateTrace, mainPathIndices);
+                if (candidateScore <= bestScore)
+                    continue;
+
+                bestTrace = candidateTrace;
+                bestScore = candidateScore;
+            }
+
+            return bestTrace;
+        }
+
+        List<Vector2Int> BuildMainPathGuidePipelineTrace(System.Random rng, IReadOnlyList<Vector2Int> mainPath)
+        {
+            var trace = new List<Vector2Int>();
+            if (mainPath == null || mainPath.Count == 0)
+                return trace;
+
+            int startIndex = Mathf.Clamp(1 + rng.Next(0, 2), 1, Mathf.Max(1, mainPath.Count - 2));
+            int goalIndex = Mathf.Clamp(mainPath.Count - 2 - rng.Next(0, 2), startIndex + 1, mainPath.Count - 1);
+            for (int i = startIndex; i <= goalIndex; i++)
+                trace.Add(mainPath[i]);
+
+            return trace;
+        }
+
+        HashSet<Vector2Int> BuildGuidePipelineAllowedPositions(MazeLayout layout)
+        {
+            var positions = new HashSet<Vector2Int>();
+            if (layout == null)
+                return positions;
+
+            for (int i = 0; i < layout.Cells.Count; i++)
+            {
+                MazeCellData cell = layout.Cells[i];
+                if (CanCarryGuidePipeline(cell))
+                    positions.Add(cell.GridPosition);
+            }
+
+            return positions;
+        }
+
+        static Dictionary<Vector2Int, int> BuildMainPathIndexLookup(IReadOnlyList<Vector2Int> mainPath)
+        {
+            var indices = new Dictionary<Vector2Int, int>();
+            if (mainPath == null)
+                return indices;
+
+            for (int i = 0; i < mainPath.Count; i++)
+            {
+                if (!indices.ContainsKey(mainPath[i]))
+                    indices.Add(mainPath[i], i);
+            }
+
+            return indices;
+        }
+
+        bool TryBuildWallCrossingGuidePipelineTrace(
+            MazeLayout layout,
+            System.Random rng,
+            HashSet<Vector2Int> allowedPositions,
+            Dictionary<Vector2Int, int> mainPathIndices,
+            Vector2Int start,
+            Vector2Int target,
+            int desiredMinimumCells,
+            out List<Vector2Int> trace)
+        {
+            trace = new List<Vector2Int> { start };
+            var visited = new HashSet<Vector2Int> { start };
+            Vector2Int current = start;
+            Vector2Int previousDirection = Vector2Int.zero;
+            int maxSteps = Mathf.Max(2, allowedPositions.Count);
+
+            for (int step = 0; step < maxSteps && current != target; step++)
+            {
+                List<GuidePipelineMoveCandidate> candidates = BuildGuidePipelineMoveCandidates(
+                    layout,
+                    rng,
+                    allowedPositions,
+                    visited,
+                    trace,
+                    mainPathIndices,
+                    current,
+                    target,
+                    previousDirection,
+                    trace.Count,
+                    desiredMinimumCells);
+
+                if (candidates.Count == 0)
+                    return false;
+
+                candidates.Sort((left, right) =>
+                {
+                    int scoreComparison = right.Score.CompareTo(left.Score);
+                    return scoreComparison != 0 ? scoreComparison : left.TieBreaker.CompareTo(right.TieBreaker);
+                });
+
+                int pickCount = Mathf.Min(candidates.Count, rng.Next(1, Mathf.Min(4, candidates.Count) + 1));
+                GuidePipelineMoveCandidate selected = candidates[rng.Next(0, pickCount)];
+                previousDirection = selected.Position - current;
+                current = selected.Position;
+                trace.Add(current);
+                visited.Add(current);
+            }
+
+            return current == target;
+        }
+
+        List<GuidePipelineMoveCandidate> BuildGuidePipelineMoveCandidates(
+            MazeLayout layout,
+            System.Random rng,
+            HashSet<Vector2Int> allowedPositions,
+            HashSet<Vector2Int> visited,
+            IReadOnlyList<Vector2Int> trace,
+            Dictionary<Vector2Int, int> mainPathIndices,
+            Vector2Int current,
+            Vector2Int target,
+            Vector2Int previousDirection,
+            int currentTraceLength,
+            int desiredMinimumCells)
+        {
+            var candidates = new List<GuidePipelineMoveCandidate>(CardinalDirections.Length);
+            for (int i = 0; i < CardinalDirections.Length; i++)
+            {
+                Vector2Int next = current + CardinalDirections[i];
+                if (!allowedPositions.Contains(next) || visited.Contains(next))
+                    continue;
+
+                if (!CanReachGuidePipelineTarget(allowedPositions, visited, next, target))
+                    continue;
+
+                int score = ScoreGuidePipelineStep(
+                    layout,
+                    mainPathIndices,
+                    visited,
+                    trace,
+                    current,
+                    next,
+                    target,
+                    previousDirection,
+                    currentTraceLength,
+                    desiredMinimumCells);
+                candidates.Add(new GuidePipelineMoveCandidate(next, score, rng.Next()));
+            }
+
+            return candidates;
+        }
+
+        static bool CanReachGuidePipelineTarget(
+            HashSet<Vector2Int> allowedPositions,
+            HashSet<Vector2Int> blockedPositions,
+            Vector2Int start,
+            Vector2Int target)
+        {
+            if (start == target)
+                return true;
+
+            var visited = new HashSet<Vector2Int> { start };
+            var frontier = new Queue<Vector2Int>();
+            frontier.Enqueue(start);
+
+            while (frontier.Count > 0)
+            {
+                Vector2Int current = frontier.Dequeue();
+                for (int i = 0; i < CardinalDirections.Length; i++)
+                {
+                    Vector2Int next = current + CardinalDirections[i];
+                    if (!allowedPositions.Contains(next) || !visited.Add(next))
+                        continue;
+
+                    if (next == target)
+                        return true;
+
+                    if (blockedPositions.Contains(next))
+                        continue;
+
+                    frontier.Enqueue(next);
+                }
+            }
+
+            return false;
+        }
+
+        int ScoreGuidePipelineStep(
+            MazeLayout layout,
+            Dictionary<Vector2Int, int> mainPathIndices,
+            HashSet<Vector2Int> visited,
+            IReadOnlyList<Vector2Int> trace,
+            Vector2Int current,
+            Vector2Int next,
+            Vector2Int target,
+            Vector2Int previousDirection,
+            int currentTraceLength,
+            int desiredMinimumCells)
+        {
+            int score = 0;
+            if (!AreCellsConnected(layout, current, next))
+                score += 120;
+
+            bool currentOnMainPath = mainPathIndices != null && mainPathIndices.ContainsKey(current);
+            bool nextOnMainPath = mainPathIndices != null && mainPathIndices.ContainsKey(next);
+            if (!nextOnMainPath)
+                score += 45;
+            else if (currentOnMainPath && Mathf.Abs(mainPathIndices[current] - mainPathIndices[next]) > 1)
+                score += 80;
+            else if (currentOnMainPath)
+                score -= 10;
+
+            Vector2Int direction = next - current;
+            if (previousDirection != Vector2Int.zero && direction == previousDirection)
+                score += 8;
+            else if (previousDirection != Vector2Int.zero)
+                score -= GuidePipelineImmediateTurnPenalty;
+
+            score -= ScoreGuidePipelineLocalCrowdingPenalty(visited, current, next);
+            score -= ScoreGuidePipelineRecentTurnPenalty(trace, next);
+
+            if (next == target)
+                score += currentTraceLength + 1 >= desiredMinimumCells ? 70 : -75;
+
+            score -= ManhattanDistance(next, target) * 2;
+            return score;
+        }
+
+        int ScoreGuidePipelineTrace(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            Dictionary<Vector2Int, int> mainPathIndices)
+        {
+            if (trace == null)
+                return int.MinValue;
+
+            int score = trace.Count;
+            var visited = new HashSet<Vector2Int>();
+            if (trace.Count > 0)
+                visited.Add(trace[0]);
+
+            for (int i = 1; i < trace.Count; i++)
+            {
+                Vector2Int previous = trace[i - 1];
+                Vector2Int current = trace[i];
+                if (!AreCellsConnected(layout, previous, current))
+                    score += 160;
+
+                bool previousOnMainPath = mainPathIndices != null && mainPathIndices.ContainsKey(previous);
+                bool currentOnMainPath = mainPathIndices != null && mainPathIndices.ContainsKey(current);
+                if (!currentOnMainPath)
+                    score += 35;
+                else if (previousOnMainPath && Mathf.Abs(mainPathIndices[previous] - mainPathIndices[current]) > 1)
+                    score += 100;
+
+                score -= ScoreGuidePipelineLocalCrowdingPenalty(visited, previous, current);
+                score -= ScoreGuidePipelineRecentTurnPenalty(trace, i);
+                visited.Add(current);
+            }
+
+            return score;
+        }
+
+        static int ScoreGuidePipelineLocalCrowdingPenalty(
+            HashSet<Vector2Int> visited,
+            Vector2Int current,
+            Vector2Int candidate)
+        {
+            if (visited == null || visited.Count == 0)
+                return 0;
+
+            int penalty = 0;
+            foreach (Vector2Int position in visited)
+            {
+                if (position == current)
+                    continue;
+
+                int dx = Mathf.Abs(candidate.x - position.x);
+                int dy = Mathf.Abs(candidate.y - position.y);
+                int chebyshevDistance = Mathf.Max(dx, dy);
+                if (chebyshevDistance <= 0)
+                    continue;
+
+                if (chebyshevDistance == 1)
+                    penalty += dx + dy == 1 ? GuidePipelineNearTracePenalty : GuidePipelineDiagonalTracePenalty;
+                else if (chebyshevDistance == 2)
+                    penalty += GuidePipelineSecondRingTracePenalty;
+
+                if (penalty >= GuidePipelineLocalCrowdingPenaltyCap)
+                    return GuidePipelineLocalCrowdingPenaltyCap;
+            }
+
+            return penalty;
+        }
+
+        static int ScoreGuidePipelineRecentTurnPenalty(IReadOnlyList<Vector2Int> trace, Vector2Int candidate)
+        {
+            int recentTurns = CountRecentGuidePipelineTurns(trace, candidate, GuidePipelineRecentTurnWindow);
+            return recentTurns <= 1 ? 0 : (recentTurns - 1) * GuidePipelineRepeatedTurnPenalty;
+        }
+
+        static int ScoreGuidePipelineRecentTurnPenalty(IReadOnlyList<Vector2Int> trace, int currentIndex)
+        {
+            int recentTurns = CountRecentGuidePipelineTurns(trace, currentIndex, GuidePipelineRecentTurnWindow);
+            return recentTurns <= 1 ? 0 : (recentTurns - 1) * GuidePipelineRepeatedTurnPenalty;
+        }
+
+        static int CountRecentGuidePipelineTurns(IReadOnlyList<Vector2Int> trace, Vector2Int candidate, int maxSegmentCount)
+        {
+            if (trace == null || trace.Count < 2)
+                return 0;
+
+            Vector2Int lastPosition = trace[trace.Count - 1];
+            int startSegment = Mathf.Max(1, trace.Count - Mathf.Max(1, maxSegmentCount) + 1);
+            Vector2Int previousDirection = Vector2Int.zero;
+            int turns = 0;
+            for (int i = startSegment; i < trace.Count; i++)
+            {
+                Vector2Int direction = trace[i] - trace[i - 1];
+                if (previousDirection != Vector2Int.zero && direction != previousDirection)
+                    turns++;
+
+                previousDirection = direction;
+            }
+
+            Vector2Int candidateDirection = candidate - lastPosition;
+            if (previousDirection != Vector2Int.zero && candidateDirection != previousDirection)
+                turns++;
+
+            return turns;
+        }
+
+        static int CountRecentGuidePipelineTurns(IReadOnlyList<Vector2Int> trace, int currentIndex, int maxSegmentCount)
+        {
+            if (trace == null || currentIndex < 2 || currentIndex >= trace.Count)
+                return 0;
+
+            int startSegment = Mathf.Max(1, currentIndex - Mathf.Max(1, maxSegmentCount) + 1);
+            Vector2Int previousDirection = Vector2Int.zero;
+            int turns = 0;
+            for (int i = startSegment; i <= currentIndex; i++)
+            {
+                Vector2Int direction = trace[i] - trace[i - 1];
+                if (previousDirection != Vector2Int.zero && direction != previousDirection)
+                    turns++;
+
+                previousDirection = direction;
+            }
+
+            return turns;
+        }
+
+        static int ManhattanDistance(Vector2Int from, Vector2Int to)
+        {
+            return Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y);
+        }
+
+        bool AreCellsConnected(MazeLayout layout, Vector2Int from, Vector2Int to)
+        {
+            return layout != null
+                && layout.TryGetCell(from, out MazeCellData source)
+                && layout.TryGetCell(to, out MazeCellData target)
+                && AreCellsConnected(source, target);
+        }
+
+        int AssignGuidePipelineConnections(MazeLayout layout, IReadOnlyList<Vector2Int> trace)
+        {
+            if (layout == null || trace == null || trace.Count < 2)
+                return 0;
+
+            var visibleCells = new HashSet<Vector2Int>();
+            for (int i = 1; i < trace.Count; i++)
+            {
+                Vector2Int previousPosition = trace[i - 1];
+                Vector2Int currentPosition = trace[i];
+                Vector2Int delta = currentPosition - previousPosition;
+                if (Mathf.Abs(delta.x) + Mathf.Abs(delta.y) != 1)
+                    continue;
+
+                if (!layout.TryGetCell(previousPosition, out MazeCellData previous)
+                    || !layout.TryGetCell(currentPosition, out MazeCellData current))
+                {
+                    continue;
+                }
+
+                if (!CanCarryGuidePipeline(previous) || !CanCarryGuidePipeline(current))
+                    continue;
+
+                MazeCellConnection previousConnection = MazeLayout.ResolveConnectionFlag(previousPosition, currentPosition);
+                MazeCellConnection currentConnection = MazeLayout.ResolveConnectionFlag(currentPosition, previousPosition);
+                previous.GuidePipelineConnections |= previousConnection;
+                current.GuidePipelineConnections |= currentConnection;
+                visibleCells.Add(previousPosition);
+                visibleCells.Add(currentPosition);
+            }
+
+            int visibleCellCount = visibleCells.Count;
+            if (visibleCellCount > 0)
+                AssignGuidePipelineLaneSides(layout, trace);
+
+            return visibleCellCount;
+        }
+
+        void ClearGuidePipelineConnections(MazeLayout layout)
+        {
+            if (layout == null)
+                return;
+
+            for (int i = 0; i < layout.Cells.Count; i++)
+            {
+                layout.Cells[i].GuidePipelineConnections = MazeCellConnection.None;
+                layout.Cells[i].GuidePipelineHorizontalLaneSide = 0;
+                layout.Cells[i].GuidePipelineVerticalLaneSide = 0;
+            }
+        }
+
+        void AssignGuidePipelineLaneSides(MazeLayout layout, IReadOnlyList<Vector2Int> trace)
+        {
+            if (layout == null || trace == null)
+                return;
+
+            InitializeGuidePipelineLaneSides(layout);
+            int passCount = Mathf.Max(1, GuidePipelineLaneScoringPasses);
+            for (int pass = 0; pass < passCount; pass++)
+            {
+                for (int i = 0; i < trace.Count; i++)
+                {
+                    if (!layout.TryGetCell(trace[i], out MazeCellData cell) || cell == null)
+                        continue;
+
+                    if (HasHorizontalGuidePipeline(cell))
+                        cell.GuidePipelineHorizontalLaneSide = ResolveBestGuidePipelineLaneSide(layout, trace, i, horizontal: true);
+
+                    if (HasVerticalGuidePipeline(cell))
+                        cell.GuidePipelineVerticalLaneSide = ResolveBestGuidePipelineLaneSide(layout, trace, i, horizontal: false);
+                }
+
+                AlignGuidePipelineConnectedLaneRuns(layout, trace);
+            }
+        }
+
+        static void InitializeGuidePipelineLaneSides(MazeLayout layout)
+        {
+            if (layout == null)
+                return;
+
+            for (int i = 0; i < layout.Cells.Count; i++)
+            {
+                MazeCellData cell = layout.Cells[i];
+                if (cell == null)
+                    continue;
+
+                cell.GuidePipelineHorizontalLaneSide = HasHorizontalGuidePipeline(cell)
+                    ? ResolveDefaultGuidePipelineHorizontalLaneSide(cell.GridPosition)
+                    : 0;
+                cell.GuidePipelineVerticalLaneSide = HasVerticalGuidePipeline(cell)
+                    ? ResolveDefaultGuidePipelineVerticalLaneSide(cell.GridPosition)
+                    : 0;
+            }
+        }
+
+        int ResolveBestGuidePipelineLaneSide(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            int traceIndex,
+            bool horizontal)
+        {
+            if (layout == null || trace == null || traceIndex < 0 || traceIndex >= trace.Count)
+                return 1;
+
+            if (!layout.TryGetCell(trace[traceIndex], out MazeCellData cell) || cell == null)
+                return 1;
+
+            int negativeScore = ScoreGuidePipelineLaneSide(layout, trace, traceIndex, cell, horizontal, -1);
+            int positiveScore = ScoreGuidePipelineLaneSide(layout, trace, traceIndex, cell, horizontal, 1);
+            return positiveScore >= negativeScore ? 1 : -1;
+        }
+
+        int ScoreGuidePipelineLaneSide(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            int traceIndex,
+            MazeCellData cell,
+            bool horizontal,
+            int side)
+        {
+            int score = side == ResolveDefaultGuidePipelineLaneSide(cell.GridPosition, horizontal)
+                ? GuidePipelineLaneDefaultSideBonus
+                : 0;
+            score += ScoreGuidePipelineLaneContinuity(layout, trace, traceIndex, horizontal, side);
+            score -= ScoreGuidePipelineAdjacentLaneCrowding(layout, cell, horizontal, side);
+            return score;
+        }
+
+        static int ScoreGuidePipelineLaneContinuity(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            int traceIndex,
+            bool horizontal,
+            int side)
+        {
+            if (layout == null || trace == null)
+                return 0;
+
+            int score = 0;
+            score += ScoreGuidePipelineLaneContinuityNeighbor(layout, trace, traceIndex, traceIndex - 1, horizontal, side);
+            score += ScoreGuidePipelineLaneContinuityNeighbor(layout, trace, traceIndex, traceIndex + 1, horizontal, side);
+            return score;
+        }
+
+        static int ScoreGuidePipelineLaneContinuityNeighbor(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            int traceIndex,
+            int neighborTraceIndex,
+            bool horizontal,
+            int side)
+        {
+            if (traceIndex < 0 || traceIndex >= trace.Count || neighborTraceIndex < 0 || neighborTraceIndex >= trace.Count)
+                return 0;
+
+            Vector2Int delta = trace[neighborTraceIndex] - trace[traceIndex];
+            if ((horizontal && Mathf.Abs(delta.x) != 1) || (!horizontal && Mathf.Abs(delta.y) != 1))
+                return 0;
+
+            if (!layout.TryGetCell(trace[neighborTraceIndex], out MazeCellData neighbor) || neighbor == null)
+                return 0;
+
+            if (horizontal && !HasHorizontalGuidePipeline(neighbor))
+                return 0;
+            if (!horizontal && !HasVerticalGuidePipeline(neighbor))
+                return 0;
+
+            int neighborSide = horizontal
+                ? ResolveGuidePipelineHorizontalLaneSide(neighbor)
+                : ResolveGuidePipelineVerticalLaneSide(neighbor);
+            return neighborSide == side
+                ? GuidePipelineLaneContinuityBonus
+                : -GuidePipelineLaneSwitchPenalty;
+        }
+
+        void AlignGuidePipelineConnectedLaneRuns(MazeLayout layout, IReadOnlyList<Vector2Int> trace)
+        {
+            if (layout == null || trace == null || trace.Count < 2)
+                return;
+
+            int runStart = 0;
+            bool runHorizontal = false;
+            bool hasRun = false;
+
+            for (int i = 1; i < trace.Count; i++)
+            {
+                Vector2Int delta = trace[i] - trace[i - 1];
+                bool segmentHorizontal = Mathf.Abs(delta.x) == 1 && delta.y == 0;
+                bool segmentVertical = Mathf.Abs(delta.y) == 1 && delta.x == 0;
+                if (!segmentHorizontal && !segmentVertical)
+                {
+                    if (hasRun)
+                        ApplyGuidePipelineLaneRun(layout, trace, runStart, i - 1, runHorizontal);
+
+                    hasRun = false;
+                    runStart = i;
+                    continue;
+                }
+
+                if (!hasRun)
+                {
+                    hasRun = true;
+                    runStart = i - 1;
+                    runHorizontal = segmentHorizontal;
+                    continue;
+                }
+
+                if (runHorizontal == segmentHorizontal)
+                    continue;
+
+                ApplyGuidePipelineLaneRun(layout, trace, runStart, i - 1, runHorizontal);
+                runStart = i - 1;
+                runHorizontal = segmentHorizontal;
+            }
+
+            if (hasRun)
+                ApplyGuidePipelineLaneRun(layout, trace, runStart, trace.Count - 1, runHorizontal);
+        }
+
+        void ApplyGuidePipelineLaneRun(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            int startIndex,
+            int endIndex,
+            bool horizontal)
+        {
+            if (layout == null || trace == null || startIndex < 0 || endIndex >= trace.Count || startIndex > endIndex)
+                return;
+
+            int negativeScore = ScoreGuidePipelineLaneRun(layout, trace, startIndex, endIndex, horizontal, -1);
+            int positiveScore = ScoreGuidePipelineLaneRun(layout, trace, startIndex, endIndex, horizontal, 1);
+            int side = positiveScore >= negativeScore ? 1 : -1;
+
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                if (!layout.TryGetCell(trace[i], out MazeCellData cell) || cell == null)
+                    continue;
+
+                if (horizontal && HasHorizontalGuidePipeline(cell))
+                    cell.GuidePipelineHorizontalLaneSide = side;
+                else if (!horizontal && HasVerticalGuidePipeline(cell))
+                    cell.GuidePipelineVerticalLaneSide = side;
+            }
+        }
+
+        int ScoreGuidePipelineLaneRun(
+            MazeLayout layout,
+            IReadOnlyList<Vector2Int> trace,
+            int startIndex,
+            int endIndex,
+            bool horizontal,
+            int side)
+        {
+            int score = 0;
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                if (!layout.TryGetCell(trace[i], out MazeCellData cell) || cell == null)
+                    continue;
+
+                if (horizontal && !HasHorizontalGuidePipeline(cell))
+                    continue;
+                if (!horizontal && !HasVerticalGuidePipeline(cell))
+                    continue;
+
+                score += ScoreGuidePipelineLaneSide(layout, trace, i, cell, horizontal, side);
+            }
+
+            return score;
+        }
+
+        static int ScoreGuidePipelineAdjacentLaneCrowding(
+            MazeLayout layout,
+            MazeCellData cell,
+            bool horizontal,
+            int side)
+        {
+            if (layout == null || cell == null)
+                return 0;
+
+            Vector2Int sideDirection = ResolveGuidePipelineLaneSideDirection(horizontal, side);
+            if (!layout.TryGetCell(cell.GridPosition + sideDirection, out MazeCellData neighbor) || neighbor == null)
+                return 0;
+
+            if (neighbor.GuidePipelineConnections == MazeCellConnection.None)
+                return 0;
+
+            bool separatedByWall = IsGuidePipelineLaneSeparatedByWall(cell, neighbor);
+            int penalty = separatedByWall
+                ? GuidePipelineLaneSeparatedNeighborPenalty
+                : GuidePipelineLaneNeighborPenalty;
+
+            if (horizontal && HasHorizontalGuidePipeline(neighbor))
+                penalty += ResolveFacingGuidePipelineLanePenalty(ResolveGuidePipelineHorizontalLaneSide(neighbor), -side, separatedByWall);
+            if (!horizontal && HasVerticalGuidePipeline(neighbor))
+                penalty += ResolveFacingGuidePipelineLanePenalty(ResolveGuidePipelineVerticalLaneSide(neighbor), -side, separatedByWall);
+
+            return Mathf.Max(0, penalty);
+        }
+
+        static int ResolveFacingGuidePipelineLanePenalty(int neighborSide, int facingSide, bool separatedByWall)
+        {
+            if (neighborSide == facingSide)
+                return separatedByWall
+                    ? Mathf.Max(1, GuidePipelineLaneFacingNeighborPenalty / 4)
+                    : GuidePipelineLaneFacingNeighborPenalty;
+
+            return separatedByWall
+                ? 0
+                : -GuidePipelineLaneFarNeighborDiscount;
+        }
+
+        static Vector2Int ResolveGuidePipelineLaneSideDirection(bool horizontal, int side)
+        {
+            if (horizontal)
+                return side >= 0 ? Vector2Int.up : Vector2Int.down;
+
+            return side >= 0 ? Vector2Int.right : Vector2Int.left;
+        }
+
+        static bool IsGuidePipelineLaneSeparatedByWall(MazeCellData cell, MazeCellData neighbor)
+        {
+            if (cell == null || neighbor == null)
+                return false;
+
+            MazeCellConnection connection = MazeLayout.ResolveConnectionFlag(cell.GridPosition, neighbor.GridPosition);
+            MazeCellConnection neighborConnection = MazeLayout.ResolveConnectionFlag(neighbor.GridPosition, cell.GridPosition);
+            bool openConnection = cell.Connections.HasFlag(connection) && neighbor.Connections.HasFlag(neighborConnection);
+            bool hiddenDoor = cell.HiddenDoorConnections.HasFlag(connection) || neighbor.HiddenDoorConnections.HasFlag(neighborConnection);
+            return !openConnection || hiddenDoor;
+        }
+
+        static bool HasHorizontalGuidePipeline(MazeCellData cell)
+        {
+            return cell != null
+                && (cell.GuidePipelineConnections.HasFlag(MazeCellConnection.East)
+                    || cell.GuidePipelineConnections.HasFlag(MazeCellConnection.West));
+        }
+
+        static bool HasVerticalGuidePipeline(MazeCellData cell)
+        {
+            return cell != null
+                && (cell.GuidePipelineConnections.HasFlag(MazeCellConnection.North)
+                    || cell.GuidePipelineConnections.HasFlag(MazeCellConnection.South));
+        }
+
+        static int ResolveGuidePipelineHorizontalLaneSide(MazeCellData cell)
+        {
+            if (cell == null || cell.GuidePipelineHorizontalLaneSide == 0)
+                return ResolveDefaultGuidePipelineHorizontalLaneSide(cell != null ? cell.GridPosition : Vector2Int.zero);
+
+            return cell.GuidePipelineHorizontalLaneSide > 0 ? 1 : -1;
+        }
+
+        static int ResolveGuidePipelineVerticalLaneSide(MazeCellData cell)
+        {
+            if (cell == null || cell.GuidePipelineVerticalLaneSide == 0)
+                return ResolveDefaultGuidePipelineVerticalLaneSide(cell != null ? cell.GridPosition : Vector2Int.zero);
+
+            return cell.GuidePipelineVerticalLaneSide > 0 ? 1 : -1;
+        }
+
+        static int ResolveDefaultGuidePipelineLaneSide(Vector2Int gridPosition, bool horizontal)
+        {
+            return horizontal
+                ? ResolveDefaultGuidePipelineHorizontalLaneSide(gridPosition)
+                : ResolveDefaultGuidePipelineVerticalLaneSide(gridPosition);
+        }
+
+        static int ResolveDefaultGuidePipelineHorizontalLaneSide(Vector2Int gridPosition)
+        {
+            return ResolveStableGuidePipelineSide(gridPosition.y);
+        }
+
+        static int ResolveDefaultGuidePipelineVerticalLaneSide(Vector2Int gridPosition)
+        {
+            return ResolveStableGuidePipelineSide(gridPosition.x);
+        }
+
+        static int ResolveStableGuidePipelineSide(int coordinate)
+        {
+            unchecked
+            {
+                int hash = coordinate * 1103515245 + 12345;
+                return (hash & 1) == 0 ? 1 : -1;
+            }
+        }
+
+        static bool CanCarryGuidePipeline(MazeCellData cell)
+        {
+            return cell != null
+                && cell.Role is not MazeCellRole.Start and not MazeCellRole.Goal;
+        }
+
+        void LogGuidePipelinePlacement(int seed, int visibleCellCount)
+        {
+            if (!m_EmitDiagnostics || m_FloorRidgeCellCount <= 0)
+                return;
+
+            Debug.Log(
+                $"MazeGenerator placed a guide pipeline across {visibleCellCount} visible cells for seed {seed}.",
+                this);
+        }
+
+        int AssignTerrainVariantToCandidates(
+            MazeLayout layout,
+            IList<Vector2Int> candidates,
+            MazeCellTerrainVariant terrainVariant,
+            int maxAssignments)
+        {
+            if (layout == null || candidates == null || maxAssignments <= 0 || terrainVariant == MazeCellTerrainVariant.None)
+                return 0;
+
+            int assigned = 0;
+            for (int i = 0; i < candidates.Count && assigned < maxAssignments; i++)
+            {
+                if (!layout.TryGetCell(candidates[i], out MazeCellData cell))
+                    continue;
+
+                if (cell == null || cell.TerrainVariant != MazeCellTerrainVariant.None)
+                    continue;
+
+                cell.TerrainVariant = terrainVariant;
+                assigned++;
+            }
+
+            return assigned;
+        }
+
+        bool IsBaseTerrainCandidate(MazeLayout layout, MazeCellData cell)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            if (cell.TerrainVariant != MazeCellTerrainVariant.None)
+                return false;
+
+            if (cell.Role != MazeCellRole.Neutral)
+                return false;
+
+            if (ResolveZoneForCell(cell, layout.MainPathLength) == MazePathZone.Start)
+                return false;
+
+            return !TouchesHiddenDoorConnection(layout, cell);
+        }
+
+        static bool HasInternalClosedCorner(MazeLayout layout, MazeCellData cell)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            return HasInternalClosedCorner(layout, cell, MazeCellConnection.North, MazeCellConnection.East)
+                || HasInternalClosedCorner(layout, cell, MazeCellConnection.East, MazeCellConnection.South)
+                || HasInternalClosedCorner(layout, cell, MazeCellConnection.South, MazeCellConnection.West)
+                || HasInternalClosedCorner(layout, cell, MazeCellConnection.West, MazeCellConnection.North);
+        }
+
+        static bool HasInternalClosedCorner(
+            MazeLayout layout,
+            MazeCellData cell,
+            MazeCellConnection firstWall,
+            MazeCellConnection secondWall)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            return IsClosed(cell, firstWall)
+                && IsClosed(cell, secondWall)
+                && HasNeighborInDirection(layout, cell, firstWall)
+                && HasNeighborInDirection(layout, cell, secondWall);
+        }
+
+        static bool HasStraightPassage(MazeCellData cell)
+        {
+            if (cell == null)
+                return false;
+
+            bool north = cell.Connections.HasFlag(MazeCellConnection.North);
+            bool east = cell.Connections.HasFlag(MazeCellConnection.East);
+            bool south = cell.Connections.HasFlag(MazeCellConnection.South);
+            bool west = cell.Connections.HasFlag(MazeCellConnection.West);
+            return north && south && !east && !west
+                || east && west && !north && !south;
+        }
+
+        static bool IsClosed(MazeCellData cell, MazeCellConnection connection)
+        {
+            return cell != null && !cell.Connections.HasFlag(connection);
+        }
+
+        static bool HasNeighborInDirection(MazeLayout layout, MazeCellData cell, MazeCellConnection connection)
+        {
+            return layout != null
+                && cell != null
+                && layout.TryGetCell(cell.GridPosition + ResolveConnectionDirection(connection), out _);
+        }
+
+        static Vector2Int ResolveConnectionDirection(MazeCellConnection connection)
+        {
+            return connection switch
+            {
+                MazeCellConnection.North => Vector2Int.up,
+                MazeCellConnection.East => Vector2Int.right,
+                MazeCellConnection.South => Vector2Int.down,
+                MazeCellConnection.West => Vector2Int.left,
+                _ => Vector2Int.zero,
+            };
+        }
+
+        static bool TouchesHiddenDoorConnection(MazeLayout layout, MazeCellData cell)
+        {
+            if (layout == null || cell == null)
+                return false;
+
+            if (cell.HiddenDoorConnections != MazeCellConnection.None)
+                return true;
+
+            for (int i = 0; i < CardinalDirections.Length; i++)
+            {
+                Vector2Int neighborPosition = cell.GridPosition + CardinalDirections[i];
+                if (!layout.TryGetCell(neighborPosition, out MazeCellData neighbor) || neighbor == null)
+                    continue;
+
+                MazeCellConnection neighborConnectionToCell = MazeLayout.ResolveConnectionFlag(neighbor.GridPosition, cell.GridPosition);
+                if (neighbor.HiddenDoorConnections.HasFlag(neighborConnectionToCell))
+                    return true;
+            }
+
+            return false;
         }
 
         void AssignEnergyRefills(MazeLayout layout, System.Random rng, List<Vector2Int> mainPath)
@@ -1503,6 +2525,29 @@ namespace CIS5680VRGame.Generation
                 this);
         }
 
+        void WarnIfTerrainPlacementShortfall(
+            MazeCellTerrainVariant terrainVariant,
+            int requestedCount,
+            int remainingCount,
+            int seed)
+        {
+            if (!m_EmitDiagnostics || requestedCount <= 0)
+                return;
+
+            int placedCount = requestedCount - Mathf.Max(0, remainingCount);
+            if (remainingCount <= 0)
+            {
+                Debug.Log(
+                    $"MazeGenerator placed {placedCount}/{requestedCount} {terrainVariant} terrain cells for seed {seed}.",
+                    this);
+                return;
+            }
+
+            Debug.LogWarning(
+                $"MazeGenerator could only place {placedCount}/{requestedCount} {terrainVariant} terrain cells for seed {seed}.",
+                this);
+        }
+
         int ResolveDirectionPreference(IReadOnlyList<Vector2Int> currentPath, Vector2Int direction)
         {
             if (currentPath == null || currentPath.Count < 2 || m_PreferredStraightStartCells <= 0)
@@ -1695,6 +2740,20 @@ namespace CIS5680VRGame.Generation
             public int TieBreaker { get; }
         }
 
+        readonly struct GuidePipelineMoveCandidate
+        {
+            public GuidePipelineMoveCandidate(Vector2Int position, int score, int tieBreaker)
+            {
+                Position = position;
+                Score = score;
+                TieBreaker = tieBreaker;
+            }
+
+            public Vector2Int Position { get; }
+            public int Score { get; }
+            public int TieBreaker { get; }
+        }
+
         readonly struct FallbackTemplateVariant
         {
             public FallbackTemplateVariant(FallbackMainPathTemplate template, Vector2Int initialDirection, int turnStep)
@@ -1749,6 +2808,13 @@ namespace CIS5680VRGame.Generation
         Late = 3,
     }
 
+    public enum MazeCellTerrainVariant
+    {
+        None = 0,
+        BeveledWallCorners = 1,
+        LowFloorRidges = 2,
+    }
+
     enum FallbackMainPathTemplate
     {
         None = 0,
@@ -1766,6 +2832,10 @@ namespace CIS5680VRGame.Generation
             Role = MazeCellRole.Neutral;
             PathZone = MazePathZone.None;
             Connections = MazeCellConnection.None;
+            TerrainVariant = MazeCellTerrainVariant.None;
+            GuidePipelineConnections = MazeCellConnection.None;
+            GuidePipelineHorizontalLaneSide = 0;
+            GuidePipelineVerticalLaneSide = 0;
         }
 
         public Vector2Int GridPosition { get; }
@@ -1775,6 +2845,10 @@ namespace CIS5680VRGame.Generation
         public MazePathZone PathZone { get; set; }
         public MazeCellConnection Connections { get; set; }
         public MazeCellConnection HiddenDoorConnections { get; set; }
+        public MazeCellTerrainVariant TerrainVariant { get; set; }
+        public MazeCellConnection GuidePipelineConnections { get; set; }
+        public int GuidePipelineHorizontalLaneSide { get; set; }
+        public int GuidePipelineVerticalLaneSide { get; set; }
     }
 
     public sealed class MazeLayout

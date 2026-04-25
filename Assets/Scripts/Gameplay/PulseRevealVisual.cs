@@ -32,6 +32,13 @@ namespace CIS5680VRGame.Gameplay
             Apply();
         }
 
+        public void RefreshTargets()
+        {
+            m_TargetRenderers = null;
+            ResolveRenderers();
+            Apply();
+        }
+
         void Awake()
         {
             ResolveRenderers();

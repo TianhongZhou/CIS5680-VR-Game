@@ -22,6 +22,7 @@ namespace CIS5680VRGame.Gameplay
         public const float WorldMenuUnitsPerPixel = 0.0022f;
         const float k_MinWorldMenuDistance = 1.65f;
         const float k_HighestComfortableWorldMenuY = -0.28f;
+        const float k_MinStableMenuYawSqrMagnitude = 0.16f;
 
         static bool s_IsPausedForMenu;
         static readonly List<Behaviour> s_DisabledBehaviours = new();
@@ -29,6 +30,8 @@ namespace CIS5680VRGame.Gameplay
         static bool s_IsLockedForTransition;
         static readonly List<Behaviour> s_TransitionDisabledBehaviours = new();
         static MovementModeManager s_TransitionLockedMovementModeManager;
+        static bool s_HasLastStableMenuYaw;
+        static Quaternion s_LastStableMenuYaw = Quaternion.identity;
 
         public static bool IsPausedForMenu => s_IsPausedForMenu;
         public static bool IsLockedForTransition => s_IsLockedForTransition;
@@ -203,6 +206,66 @@ namespace CIS5680VRGame.Gameplay
             menuRoot.transform.localScale = Vector3.one * WorldMenuUnitsPerPixel;
         }
 
+        public static void RefreshWorldMenuPoseSafely(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3? localOffset,
+            Vector2 panelSize,
+            LayerMask obstacleMask,
+            float minimumDistance,
+            float wallClearance)
+        {
+            if (menuRoot == null || menuCamera == null)
+                return;
+
+            Vector3 resolvedOffset = ResolveWorldMenuOffset(localOffset ?? WorldMenuLocalOffset);
+            float targetDistance = Mathf.Max(resolvedOffset.z, minimumDistance);
+            float safeMinimumDistance = Mathf.Clamp(minimumDistance, 0.55f, targetDistance);
+            float safeClearance = Mathf.Max(0.05f, wallClearance);
+            Quaternion baseYaw = ResolveYawOnlyRotation(menuCamera.transform);
+            Vector3 cameraPosition = menuCamera.transform.position;
+            Vector3 localOffsetWithoutDepth = new(resolvedOffset.x, resolvedOffset.y, 0f);
+            float safeScaleMultiplier = 1f;
+
+            if (!TryResolveSafeWorldMenuPoseWithScale(
+                    menuRoot,
+                    menuCamera,
+                    cameraPosition,
+                    baseYaw,
+                    localOffsetWithoutDepth,
+                    targetDistance,
+                    safeMinimumDistance,
+                    safeClearance,
+                    panelSize,
+                    obstacleMask,
+                    out Vector3 safePosition,
+                    out Quaternion safeRotation,
+                    out safeScaleMultiplier))
+            {
+                safeScaleMultiplier = 0.68f;
+                if (!TryResolveEmergencyWorldMenuPose(
+                        menuRoot,
+                        menuCamera,
+                        cameraPosition,
+                        baseYaw,
+                        localOffsetWithoutDepth,
+                        Mathf.Max(0.65f, safeMinimumDistance * safeScaleMultiplier),
+                        safeClearance,
+                        obstacleMask,
+                        out safePosition,
+                        out safeRotation))
+                {
+                    safeRotation = Quaternion.AngleAxis(-90f, Vector3.up) * baseYaw;
+                    Vector3 fallbackDirection = safeRotation * Vector3.forward;
+                    safePosition = cameraPosition + safeRotation * localOffsetWithoutDepth + fallbackDirection * Mathf.Max(0.65f, safeMinimumDistance * safeScaleMultiplier);
+                }
+            }
+
+            menuRoot.transform.SetParent(null, false);
+            menuRoot.transform.SetPositionAndRotation(safePosition, safeRotation);
+            menuRoot.transform.localScale = Vector3.one * (WorldMenuUnitsPerPixel * safeScaleMultiplier);
+        }
+
         public static void ConfigureWorldSpaceCanvasScaler(CanvasScaler scaler)
         {
             if (scaler == null)
@@ -264,6 +327,356 @@ namespace CIS5680VRGame.Gameplay
 
             localOffset.z = Mathf.Max(localOffset.z, k_MinWorldMenuDistance);
             return localOffset;
+        }
+
+        static Quaternion ResolveYawOnlyRotation(Transform source)
+        {
+            Vector3 forward = source != null ? source.forward : Vector3.forward;
+            if (TryResolveStableYaw(forward, out Quaternion stableYaw))
+                return stableYaw;
+
+            if (source != null && TryResolveStableYaw(source.root.forward, out stableYaw))
+                return stableYaw;
+
+            if (s_HasLastStableMenuYaw)
+                return s_LastStableMenuYaw;
+
+            return Quaternion.identity;
+        }
+
+        static bool TryResolveStableYaw(Vector3 forward, out Quaternion yaw)
+        {
+            forward = Vector3.ProjectOnPlane(forward, Vector3.up);
+            if (forward.sqrMagnitude < k_MinStableMenuYawSqrMagnitude)
+            {
+                yaw = Quaternion.identity;
+                return false;
+            }
+
+            yaw = Quaternion.LookRotation(forward.normalized, Vector3.up);
+            s_LastStableMenuYaw = yaw;
+            s_HasLastStableMenuYaw = true;
+            return true;
+        }
+
+        static bool TryResolveSafeWorldMenuPoseWithScale(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3 cameraPosition,
+            Quaternion baseYaw,
+            Vector3 localOffsetWithoutDepth,
+            float targetDistance,
+            float minimumDistance,
+            float wallClearance,
+            Vector2 panelSize,
+            LayerMask obstacleMask,
+            out Vector3 safePosition,
+            out Quaternion safeRotation,
+            out float safeScaleMultiplier)
+        {
+            float[] yawOffsets = { 0f, -32f, 32f, -64f, 64f, -105f, 105f, -145f, 145f, 180f };
+            float[] scaleMultipliers = { 1f, 0.82f, 0.68f };
+
+            for (int yawIndex = 0; yawIndex < yawOffsets.Length; yawIndex++)
+            {
+                Quaternion candidateYaw = Quaternion.AngleAxis(yawOffsets[yawIndex], Vector3.up) * baseYaw;
+                for (int scaleIndex = 0; scaleIndex < scaleMultipliers.Length; scaleIndex++)
+                {
+                    float scaleMultiplier = scaleMultipliers[scaleIndex];
+                    if (TryResolveSafeWorldMenuPose(
+                            menuRoot,
+                            menuCamera,
+                            cameraPosition,
+                            candidateYaw,
+                            localOffsetWithoutDepth,
+                            targetDistance,
+                            Mathf.Max(0.65f, minimumDistance * scaleMultiplier),
+                            wallClearance,
+                            panelSize * scaleMultiplier,
+                            obstacleMask,
+                            out safePosition,
+                            out safeRotation))
+                    {
+                        safeScaleMultiplier = scaleMultiplier;
+                        return true;
+                    }
+                }
+            }
+
+            safePosition = Vector3.zero;
+            safeRotation = baseYaw;
+            safeScaleMultiplier = 1f;
+            return false;
+        }
+
+        static bool TryResolveSafeWorldMenuPose(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3 cameraPosition,
+            Quaternion baseYaw,
+            Vector3 localOffsetWithoutDepth,
+            float targetDistance,
+            float minimumDistance,
+            float wallClearance,
+            Vector2 panelSize,
+            LayerMask obstacleMask,
+            out Vector3 safePosition,
+            out Quaternion safeRotation)
+        {
+            safePosition = Vector3.zero;
+            safeRotation = baseYaw;
+
+            float[] distanceMultipliers = { 1f, 0.82f, 0.68f, 0.52f, 0.45f };
+
+            Quaternion candidateRotation = baseYaw;
+            Vector3 candidateForward = candidateRotation * Vector3.forward;
+            Vector3 candidateBaseOffset = candidateRotation * localOffsetWithoutDepth;
+
+            for (int distanceIndex = 0; distanceIndex < distanceMultipliers.Length; distanceIndex++)
+            {
+                float requestedDistance = Mathf.Max(minimumDistance, targetDistance * distanceMultipliers[distanceIndex]);
+                Vector3 requestedPosition = cameraPosition + candidateBaseOffset + candidateForward * requestedDistance;
+
+                if (!TryClampMenuDistanceForObstacles(
+                        menuRoot,
+                        menuCamera,
+                        cameraPosition,
+                        requestedPosition,
+                        minimumDistance,
+                        wallClearance,
+                        obstacleMask,
+                        out Vector3 candidatePosition))
+                {
+                    continue;
+                }
+
+                if (MenuPanelOverlapsObstacle(
+                        menuRoot,
+                        menuCamera,
+                        candidatePosition,
+                        candidateRotation,
+                        panelSize,
+                        wallClearance,
+                        obstacleMask))
+                {
+                    continue;
+                }
+
+                safePosition = candidatePosition;
+                safeRotation = candidateRotation;
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryResolveEmergencyWorldMenuPose(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3 cameraPosition,
+            Quaternion baseYaw,
+            Vector3 localOffsetWithoutDepth,
+            float minimumDistance,
+            float wallClearance,
+            LayerMask obstacleMask,
+            out Vector3 safePosition,
+            out Quaternion safeRotation)
+        {
+            safePosition = Vector3.zero;
+            safeRotation = baseYaw;
+
+            float[] yawOffsets = { 0f, -32f, 32f, -64f, 64f, -105f, 105f, -145f, 145f, 180f };
+            for (int yawIndex = 0; yawIndex < yawOffsets.Length; yawIndex++)
+            {
+                Quaternion candidateRotation = Quaternion.AngleAxis(yawOffsets[yawIndex], Vector3.up) * baseYaw;
+                Vector3 candidateForward = candidateRotation * Vector3.forward;
+                Vector3 candidateBaseOffset = candidateRotation * localOffsetWithoutDepth;
+                Vector3 requestedPosition = cameraPosition + candidateBaseOffset + candidateForward * minimumDistance;
+
+                if (!TryClampMenuDistanceForObstacles(
+                        menuRoot,
+                        menuCamera,
+                        cameraPosition,
+                        requestedPosition,
+                        Mathf.Max(0.45f, minimumDistance * 0.72f),
+                        wallClearance,
+                        obstacleMask,
+                        out Vector3 candidatePosition))
+                {
+                    continue;
+                }
+
+                safePosition = candidatePosition;
+                safeRotation = candidateRotation;
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool TryClampMenuDistanceForObstacles(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3 cameraPosition,
+            Vector3 requestedPosition,
+            float minimumDistance,
+            float wallClearance,
+            LayerMask obstacleMask,
+            out Vector3 clampedPosition)
+        {
+            clampedPosition = requestedPosition;
+            Vector3 toMenu = requestedPosition - cameraPosition;
+            float castDistance = toMenu.magnitude;
+            if (castDistance <= 0.001f)
+                return false;
+
+            Vector3 castDirection = toMenu / castDistance;
+            float castRadius = Mathf.Clamp(wallClearance * 0.55f, 0.08f, 0.18f);
+            if (CandidateStartsBlockedByObstacle(menuRoot, menuCamera, cameraPosition, castDirection, Mathf.Max(castRadius, wallClearance), obstacleMask))
+                return false;
+
+            RaycastHit[] hits = Physics.SphereCastAll(
+                cameraPosition,
+                castRadius,
+                castDirection,
+                castDistance + wallClearance,
+                obstacleMask,
+                QueryTriggerInteraction.Ignore);
+
+            float nearestBlockingDistance = float.PositiveInfinity;
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit hit = hits[i];
+                if (hit.collider == null || ShouldIgnoreMenuPlacementCollider(menuRoot, menuCamera, hit.collider))
+                    continue;
+
+                nearestBlockingDistance = Mathf.Min(nearestBlockingDistance, hit.distance);
+            }
+
+            RaycastHit[] rayHits = Physics.RaycastAll(
+                cameraPosition,
+                castDirection,
+                castDistance + wallClearance,
+                obstacleMask,
+                QueryTriggerInteraction.Ignore);
+
+            for (int i = 0; i < rayHits.Length; i++)
+            {
+                RaycastHit hit = rayHits[i];
+                if (hit.collider == null || ShouldIgnoreMenuPlacementCollider(menuRoot, menuCamera, hit.collider))
+                    continue;
+
+                nearestBlockingDistance = Mathf.Min(nearestBlockingDistance, hit.distance);
+            }
+
+            if (float.IsPositiveInfinity(nearestBlockingDistance))
+                return true;
+
+            float adjustedDistance = nearestBlockingDistance - wallClearance;
+            if (adjustedDistance < minimumDistance)
+                return false;
+
+            float distanceRatio = Mathf.Clamp01(adjustedDistance / Mathf.Max(0.001f, castDistance));
+            clampedPosition = Vector3.Lerp(cameraPosition, requestedPosition, distanceRatio);
+            return true;
+        }
+
+        static bool CandidateStartsBlockedByObstacle(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3 cameraPosition,
+            Vector3 castDirection,
+            float startProbeRadius,
+            LayerMask obstacleMask)
+        {
+            Collider[] overlaps = Physics.OverlapSphere(
+                cameraPosition,
+                Mathf.Max(0.05f, startProbeRadius),
+                obstacleMask,
+                QueryTriggerInteraction.Ignore);
+
+            for (int i = 0; i < overlaps.Length; i++)
+            {
+                Collider overlap = overlaps[i];
+                if (overlap == null || ShouldIgnoreMenuPlacementCollider(menuRoot, menuCamera, overlap))
+                    continue;
+
+                Vector3 closestPoint = overlap.ClosestPoint(cameraPosition);
+                Vector3 toObstacle = closestPoint - cameraPosition;
+                float sqrDistance = toObstacle.sqrMagnitude;
+                if (sqrDistance <= 0.000001f)
+                {
+                    Vector3 toBoundsCenter = overlap.bounds.center - cameraPosition;
+                    toBoundsCenter = Vector3.ProjectOnPlane(toBoundsCenter, Vector3.up);
+                    if (toBoundsCenter.sqrMagnitude <= 0.000001f)
+                        continue;
+
+                    if (Vector3.Dot(toBoundsCenter.normalized, castDirection) > 0.12f)
+                        return true;
+
+                    continue;
+                }
+
+                float alignment = Vector3.Dot(toObstacle / Mathf.Sqrt(sqrDistance), castDirection);
+                if (alignment > 0.12f)
+                    return true;
+            }
+
+            return false;
+        }
+
+        static bool MenuPanelOverlapsObstacle(
+            GameObject menuRoot,
+            Camera menuCamera,
+            Vector3 position,
+            Quaternion rotation,
+            Vector2 panelSize,
+            float wallClearance,
+            LayerMask obstacleMask)
+        {
+            Vector3 halfExtents = new(
+                Mathf.Max(0.24f, panelSize.x * WorldMenuUnitsPerPixel * 0.5f + 0.04f),
+                Mathf.Max(0.2f, panelSize.y * WorldMenuUnitsPerPixel * 0.5f + 0.04f),
+                Mathf.Clamp(wallClearance * 0.65f, 0.08f, 0.18f));
+
+            Collider[] overlaps = Physics.OverlapBox(
+                position,
+                halfExtents,
+                rotation,
+                obstacleMask,
+                QueryTriggerInteraction.Ignore);
+
+            for (int i = 0; i < overlaps.Length; i++)
+            {
+                Collider overlap = overlaps[i];
+                if (overlap == null || ShouldIgnoreMenuPlacementCollider(menuRoot, menuCamera, overlap))
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        static bool ShouldIgnoreMenuPlacementCollider(GameObject menuRoot, Camera menuCamera, Collider collider)
+        {
+            if (collider == null)
+                return true;
+
+            if (collider.isTrigger)
+                return true;
+
+            Transform colliderTransform = collider.transform;
+            if (menuRoot != null && (colliderTransform.IsChildOf(menuRoot.transform) || menuRoot.transform.IsChildOf(colliderTransform)))
+                return true;
+
+            if (menuCamera != null && colliderTransform.IsChildOf(menuCamera.transform.root))
+                return true;
+
+            if (collider.GetComponentInParent<Canvas>() != null)
+                return true;
+
+            return false;
         }
 
         public static GameObject CreateUIObject(string name, Transform parent)

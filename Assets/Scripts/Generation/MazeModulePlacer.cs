@@ -14,6 +14,7 @@ namespace CIS5680VRGame.Generation
     {
         static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
         static readonly int ColorPropertyId = Shader.PropertyToID("_Color");
+        static readonly int EmissionColorPropertyId = Shader.PropertyToID("_EmissionColor");
         static readonly Vector2Int[] HiddenDoorSecurityDirections =
         {
             Vector2Int.up,
@@ -25,6 +26,7 @@ namespace CIS5680VRGame.Generation
         const string FloorsRootName = "Floors";
         const string WallsRootName = "Walls";
         const string HiddenDoorsRootName = "HiddenDoors";
+        const string TerrainDetailsRootName = "TerrainDetails";
         const string MarkersRootName = "Markers";
         const string StartRootName = "Start";
         const string SupportRootName = "Support";
@@ -44,6 +46,7 @@ namespace CIS5680VRGame.Generation
         const string HiddenDoorOpenedClipResourcePath = "Audio/Gameplay/HiddenDoor/door_open";
         const string HiddenDoorProgressResetClipResourcePath = "Audio/Gameplay/HiddenDoor/reset_progress";
         const string GroundLayerName = "Ground";
+        const float GuidePipelineClampMinSegmentSpacingRatio = 0.85f;
 
         static AudioClip s_DefaultHiddenDoorPulseHitClip;
         static AudioClip s_DefaultHiddenDoorTriggeredClip;
@@ -77,6 +80,15 @@ namespace CIS5680VRGame.Generation
         [SerializeField, Min(0.05f)] float m_WallThickness = 0.2f;
         [SerializeField, Min(0f)] float m_SupportPadding = 1.5f;
         [SerializeField, Min(0.05f)] float m_SupportThickness = 0.6f;
+
+        [Header("Terrain Variants")]
+        [SerializeField, Min(0.1f)] float m_BeveledCornerRun = 1.1f;
+        [SerializeField, Min(0.5f)] float m_BeveledCornerThicknessMultiplier = 1.15f;
+        [SerializeField, Min(0.01f)] float m_FloorRidgeHeight = 0.055f;
+        [SerializeField, Min(0.02f)] float m_FloorRidgeWidth = 0.1f;
+        [SerializeField, Min(0.2f)] float m_FloorRidgeLength = 2.45f;
+        [SerializeField, Min(0.05f)] float m_FloorRidgeSpacing = 0.46f;
+        [SerializeField, Min(0.05f)] float m_GuidePipelineEdgeInset = 0.5f;
 
         [Header("Special Placement")]
         [SerializeField] Vector3 m_StartLocalOffset = Vector3.zero;
@@ -120,6 +132,9 @@ namespace CIS5680VRGame.Generation
         Vector3 m_LastResolvedOrigin;
         bool m_HasResolvedOrigin;
         Material m_RuntimeHiddenDoorInteractionPointMaterial;
+        Material m_RuntimeGuidePipelineBaseMaterial;
+        Material m_RuntimeGuidePipelineGlowMaterial;
+        Material m_RuntimeGuidePipelineHaloMaterial;
         readonly Dictionary<Vector2Int, MazePlacedModuleNavigationData> m_PlacedNavigationModules = new();
 
         public float CellSize => m_CellSize;
@@ -147,6 +162,7 @@ namespace CIS5680VRGame.Generation
             Transform floorsRoot = EnsureChild(grayboxRoot, FloorsRootName);
             Transform wallsRoot = EnsureChild(grayboxRoot, WallsRootName);
             Transform supportRoot = EnsureChild(grayboxRoot, SupportRootName);
+            Transform terrainDetailsRoot = EnsureChild(grayboxRoot, TerrainDetailsRootName);
             Transform hiddenDoorsRoot = EnsureChild(bootstrap.ModulesRoot, HiddenDoorsRootName);
             Transform markersRoot = EnsureChild(bootstrap.ModulesRoot, MarkersRootName);
             Transform startRoot = EnsureChild(bootstrap.ModulesRoot, StartRootName);
@@ -154,6 +170,7 @@ namespace CIS5680VRGame.Generation
             ClearChildren(floorsRoot);
             ClearChildren(wallsRoot);
             ClearChildren(supportRoot);
+            ClearChildren(terrainDetailsRoot);
             ClearChildren(hiddenDoorsRoot);
             ClearChildren(markersRoot);
             ClearChildren(startRoot);
@@ -169,6 +186,7 @@ namespace CIS5680VRGame.Generation
             {
                 MazeCellData cell = layout.Cells[i];
                 CreateFloor(floorsRoot, cell);
+                BuildCellTerrainDetails(terrainDetailsRoot, cell);
                 BuildCellWalls(wallsRoot, layout, cell);
                 BuildCellHiddenDoors(hiddenDoorsRoot, layout, bootstrap, cell);
                 GameObject placedSpecialObject = PlaceSpecialObject(bootstrap, startRoot, cell);
@@ -180,6 +198,7 @@ namespace CIS5680VRGame.Generation
 
             CreateSupportSlab(supportRoot, layout);
             RebuildRenderSkin(grayboxRoot, floorsRoot);
+            ConfigureGuidePipelinePulseResponder(terrainDetailsRoot, layout);
             PlacePrototypeEnemies(layout, bootstrap);
         }
 
@@ -238,12 +257,843 @@ namespace CIS5680VRGame.Generation
                 floorRenderer.sharedMaterial = ResolveFloorMaterial();
         }
 
+        void BuildCellTerrainDetails(Transform parent, MazeCellData cell)
+        {
+            if (parent == null || cell == null)
+                return;
+
+            if (cell.GuidePipelineConnections != MazeCellConnection.None)
+                CreateGuidePipeline(parent, cell);
+        }
+
+        void CreateGuidePipeline(Transform parent, MazeCellData cell)
+        {
+            if (parent == null || cell == null)
+                return;
+
+            GameObject pipelineRoot = new($"GuidePipeline_{cell.GridPosition.x}_{cell.GridPosition.y}");
+            pipelineRoot.transform.SetParent(parent, false);
+            pipelineRoot.transform.position = ResolveCellWorldPosition(cell.GridPosition);
+
+            ResolveGuidePipelineVisualMetrics(
+                out float conduitHeight,
+                out float channelWidth,
+                out float coreWidth,
+                out float halfCellReach,
+                out float laneOffset,
+                out float topOffset);
+
+            CreateGuidePipelineSegmentSet(
+                pipelineRoot.transform,
+                cell,
+                laneOffset,
+                halfCellReach,
+                topOffset,
+                conduitHeight,
+                channelWidth,
+                coreWidth);
+
+            AttachPulseRevealVisual(
+                pipelineRoot,
+                new Color(0.001f, 0.004f, 0.005f, 1f),
+                new Color(0.03f, 0.18f, 0.22f, 1f),
+                0.35f);
+        }
+
+        void CreateGuidePipelineSegmentSet(
+            Transform parent,
+            MazeCellData cell,
+            float laneOffset,
+            float halfCellReach,
+            float topOffset,
+            float conduitHeight,
+            float channelWidth,
+            float coreWidth)
+        {
+            if (parent == null || cell == null)
+                return;
+
+            MazeCellConnection connections = cell.GuidePipelineConnections;
+            if (connections == MazeCellConnection.None)
+                return;
+
+            float horizontalLaneZ = ResolveGuidePipelineHorizontalLaneZ(cell, laneOffset);
+            float verticalLaneX = ResolveGuidePipelineVerticalLaneX(cell, laneOffset);
+            bool hasHorizontal = connections.HasFlag(MazeCellConnection.East)
+                || connections.HasFlag(MazeCellConnection.West);
+            bool hasVertical = connections.HasFlag(MazeCellConnection.North)
+                || connections.HasFlag(MazeCellConnection.South);
+
+            if (connections.HasFlag(MazeCellConnection.East)
+                && connections.HasFlag(MazeCellConnection.West)
+                && !hasVertical)
+            {
+                CreateGuidePipelineSegment(
+                    parent,
+                    "GuidePipeline_EastWest",
+                    new Vector3(-halfCellReach, 0f, horizontalLaneZ),
+                    new Vector3(halfCellReach, 0f, horizontalLaneZ),
+                    topOffset,
+                    conduitHeight,
+                    channelWidth,
+                    coreWidth);
+                return;
+            }
+
+            if (connections.HasFlag(MazeCellConnection.North)
+                && connections.HasFlag(MazeCellConnection.South)
+                && !hasHorizontal)
+            {
+                CreateGuidePipelineSegment(
+                    parent,
+                    "GuidePipeline_NorthSouth",
+                    new Vector3(verticalLaneX, 0f, -halfCellReach),
+                    new Vector3(verticalLaneX, 0f, halfCellReach),
+                    topOffset,
+                    conduitHeight,
+                    channelWidth,
+                    coreWidth);
+                return;
+            }
+
+            Vector3 hub = new(verticalLaneX, 0f, horizontalLaneZ);
+            TryCreateGuidePipelineArm(parent, connections, MazeCellConnection.North, hub, verticalLaneX, horizontalLaneZ, halfCellReach, topOffset, conduitHeight, channelWidth, coreWidth);
+            TryCreateGuidePipelineArm(parent, connections, MazeCellConnection.East, hub, verticalLaneX, horizontalLaneZ, halfCellReach, topOffset, conduitHeight, channelWidth, coreWidth);
+            TryCreateGuidePipelineArm(parent, connections, MazeCellConnection.South, hub, verticalLaneX, horizontalLaneZ, halfCellReach, topOffset, conduitHeight, channelWidth, coreWidth);
+            TryCreateGuidePipelineArm(parent, connections, MazeCellConnection.West, hub, verticalLaneX, horizontalLaneZ, halfCellReach, topOffset, conduitHeight, channelWidth, coreWidth);
+
+            Vector3 hubPosition = hub + Vector3.up * topOffset;
+            CreateGuidePipelinePiece(
+                parent,
+                "GuidePipelineHub",
+                hubPosition,
+                new Vector3(channelWidth * 1.2f, conduitHeight, channelWidth * 1.2f),
+                ResolveGuidePipelineBaseMaterial());
+            CreateGuidePipelinePiece(
+                parent,
+                "GuidePipelineHubCore",
+                hubPosition + Vector3.up * (conduitHeight * 0.58f),
+                new Vector3(coreWidth * 1.45f, conduitHeight * 0.38f, coreWidth * 1.45f),
+                ResolveGuidePipelineGlowMaterial());
+        }
+
+        void TryCreateGuidePipelineArm(
+            Transform parent,
+            MazeCellConnection connections,
+            MazeCellConnection connection,
+            Vector3 hub,
+            float verticalLaneX,
+            float horizontalLaneZ,
+            float halfCellReach,
+            float topOffset,
+            float conduitHeight,
+            float channelWidth,
+            float coreWidth)
+        {
+            if (!connections.HasFlag(connection))
+                return;
+
+            Vector2Int direction = ResolveConnectionDirection(connection);
+            Vector3 end = direction.x != 0
+                ? new Vector3(direction.x * halfCellReach, 0f, horizontalLaneZ)
+                : new Vector3(verticalLaneX, 0f, direction.y * halfCellReach);
+            CreateGuidePipelineSegment(parent, $"GuidePipeline_{connection}", hub, end, topOffset, conduitHeight, channelWidth, coreWidth);
+        }
+
+        void CreateGuidePipelineSegment(
+            Transform parent,
+            string name,
+            Vector3 localStart,
+            Vector3 localEnd,
+            float topOffset,
+            float conduitHeight,
+            float channelWidth,
+            float coreWidth)
+        {
+            if (parent == null)
+                return;
+
+            Vector3 delta = localEnd - localStart;
+            if (Mathf.Abs(delta.x) + Mathf.Abs(delta.z) <= 0.01f)
+                return;
+
+            bool horizontal = Mathf.Abs(delta.x) >= Mathf.Abs(delta.z);
+            Vector3 center = (localStart + localEnd) * 0.5f + Vector3.up * topOffset;
+            float length = Mathf.Max(0.04f, horizontal ? Mathf.Abs(delta.x) : Mathf.Abs(delta.z));
+
+            Vector3 channelScale = horizontal
+                ? new Vector3(length + channelWidth, conduitHeight, channelWidth)
+                : new Vector3(channelWidth, conduitHeight, length + channelWidth);
+            Vector3 haloScale = horizontal
+                ? new Vector3(length + channelWidth * 1.35f, conduitHeight * 0.2f, channelWidth * 1.7f)
+                : new Vector3(channelWidth * 1.7f, conduitHeight * 0.2f, length + channelWidth * 1.35f);
+            Vector3 coreScale = horizontal
+                ? new Vector3(length + coreWidth, conduitHeight * 0.34f, coreWidth)
+                : new Vector3(coreWidth, conduitHeight * 0.34f, length + coreWidth);
+
+            CreateGuidePipelinePiece(parent, $"{name}_Halo", center + Vector3.down * (conduitHeight * 0.42f), haloScale, ResolveGuidePipelineHaloMaterial());
+            CreateGuidePipelinePiece(parent, $"{name}_Channel", center, channelScale, ResolveGuidePipelineBaseMaterial());
+            CreateGuidePipelinePiece(parent, $"{name}_Core", center + Vector3.up * (conduitHeight * 0.58f), coreScale, ResolveGuidePipelineGlowMaterial());
+            CreateGuidePipelineSegmentClamps(parent, name, localStart, localEnd, topOffset, conduitHeight, channelWidth, coreWidth);
+        }
+
+        void CreateGuidePipelineSegmentClamps(
+            Transform parent,
+            string name,
+            Vector3 localStart,
+            Vector3 localEnd,
+            float topOffset,
+            float conduitHeight,
+            float channelWidth,
+            float coreWidth)
+        {
+            Vector3 delta = localEnd - localStart;
+            bool horizontal = Mathf.Abs(delta.x) >= Mathf.Abs(delta.z);
+            float length = Mathf.Max(0.04f, horizontal ? Mathf.Abs(delta.x) : Mathf.Abs(delta.z));
+            int clampCount = ResolveGuidePipelineClampCount(length, ResolveGuidePipelineClampSpacing());
+            if (clampCount <= 0)
+                return;
+
+            Material clampMaterial = ResolveGuidePipelineBaseMaterial();
+
+            for (int i = 1; i <= clampCount; i++)
+            {
+                float t = i / (clampCount + 1f);
+                Vector3 position = Vector3.Lerp(localStart, localEnd, t) + Vector3.up * (topOffset + conduitHeight * 0.62f);
+                Vector3 scale = horizontal
+                    ? new Vector3(coreWidth * 1.2f, conduitHeight * 0.36f, channelWidth * 1.32f)
+                    : new Vector3(channelWidth * 1.32f, conduitHeight * 0.36f, coreWidth * 1.2f);
+                CreateGuidePipelinePiece(parent, $"{name}_Clamp_{i}", position, scale, clampMaterial);
+            }
+        }
+
+        void CreateGuidePipelinePiece(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Material material)
+        {
+            GameObject piece = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            piece.name = name;
+            piece.transform.SetParent(parent, false);
+            piece.transform.localPosition = localPosition;
+            piece.transform.localRotation = Quaternion.identity;
+            piece.transform.localScale = localScale;
+            piece.layer = ResolveGroundLayer();
+
+            Collider pieceCollider = piece.GetComponent<Collider>();
+            if (pieceCollider != null)
+                DestroyImmediateOrRuntime(pieceCollider);
+
+            Renderer pieceRenderer = piece.GetComponent<Renderer>();
+            if (pieceRenderer != null)
+                pieceRenderer.sharedMaterial = material != null ? material : ResolveFloorMaterial();
+        }
+
+        void ConfigureGuidePipelinePulseResponder(Transform terrainDetailsRoot, MazeLayout layout)
+        {
+            if (terrainDetailsRoot == null)
+                return;
+
+            GuidePipelineFlowBuildResult flowData = BuildGuidePipelineFlowPath(layout);
+            GuidePipelinePulseResponder responder = terrainDetailsRoot.GetComponent<GuidePipelinePulseResponder>();
+            if (flowData.Points.Count < 2)
+            {
+                if (responder != null)
+                    responder.Configure(null, m_FloorRidgeWidth, 0f);
+                return;
+            }
+
+            if (responder == null)
+                responder = terrainDetailsRoot.gameObject.AddComponent<GuidePipelinePulseResponder>();
+
+            ResolveGuidePipelineVisualMetrics(
+                out float conduitHeight,
+                out float channelWidth,
+                out float coreWidth,
+                out _,
+                out _,
+                out _);
+            float flowWidth = Mathf.Clamp(coreWidth * 0.82f, 0.04f, channelWidth * 0.38f);
+            responder.Configure(flowData.Points, flowData.OccludedIntervals, flowWidth, Mathf.Min(0.0015f, conduitHeight * 0.04f));
+        }
+
+        GuidePipelineFlowBuildResult BuildGuidePipelineFlowPath(MazeLayout layout)
+        {
+            var flowData = new GuidePipelineFlowBuildResult();
+            if (layout == null || layout.Cells == null)
+                return flowData;
+
+            Dictionary<Vector2Int, MazeCellData> guideCells = BuildGuidePipelineCellLookup(layout);
+            if (guideCells.Count < 2)
+                return flowData;
+
+            Dictionary<Vector2Int, List<Vector2Int>> adjacency = BuildGuidePipelineAdjacency(guideCells);
+            if (adjacency.Count < 2)
+                return flowData;
+
+            List<Vector2Int> endpoints = BuildGuidePipelineEndpoints(adjacency);
+            IReadOnlyList<Vector2Int> endpointCandidates = endpoints.Count > 0
+                ? endpoints
+                : new List<Vector2Int>(guideCells.Keys);
+            Vector2Int goalPosition = ResolveGuidePipelineGoalPosition(layout);
+            Vector2Int goalEndpoint = SelectGuidePipelineEndpoint(endpointCandidates, goalPosition, preferClosest: true);
+            Vector2Int startEndpoint = SelectGuidePipelineEndpoint(endpointCandidates, goalPosition, preferClosest: false);
+
+            if (startEndpoint == goalEndpoint && endpointCandidates.Count > 1)
+                startEndpoint = SelectGuidePipelineEndpoint(endpointCandidates, goalEndpoint, preferClosest: false);
+
+            List<Vector2Int> orderedCells = FindGuidePipelineCellPath(adjacency, startEndpoint, goalEndpoint);
+            if (orderedCells.Count < 2)
+                return flowData;
+
+            ResolveGuidePipelineVisualMetrics(
+                out float conduitHeight,
+                out float channelWidth,
+                out float coreWidth,
+                out float halfCellReach,
+                out float laneOffset,
+                out float topOffset);
+            float clampHalfLength = ResolveGuidePipelineClampOcclusionHalfLength(coreWidth);
+            float clampSpacingDivisor = ResolveGuidePipelineClampSpacing();
+
+            for (int i = 0; i < orderedCells.Count; i++)
+            {
+                Vector2Int currentPosition = orderedCells[i];
+                if (!guideCells.TryGetValue(currentPosition, out MazeCellData currentCell))
+                    continue;
+
+                if (i == 0)
+                    flowData.AddPoint(ResolveGuidePipelineAnchorWorldPosition(currentCell, conduitHeight, channelWidth, laneOffset, topOffset));
+
+                if (i > 0)
+                {
+                    Vector2Int previousPosition = orderedCells[i - 1];
+                    Vector2Int direction = currentPosition - previousPosition;
+                    MazeCellData previousCell = null;
+                    bool hasPreviousCell = guideCells.TryGetValue(previousPosition, out previousCell);
+                    float crossingStartDistance = flowData.CurrentDistance;
+                    if (hasPreviousCell)
+                    {
+                        crossingStartDistance = flowData.AddPointWithStructuralClamps(
+                            ResolveGuidePipelineConnectionWorldPosition(previousCell, direction, conduitHeight, channelWidth, halfCellReach, laneOffset, topOffset),
+                            clampHalfLength,
+                            clampSpacingDivisor);
+                    }
+
+                    float crossingEndDistance = flowData.AddPoint(
+                        ResolveGuidePipelineConnectionWorldPosition(currentCell, -direction, conduitHeight, channelWidth, halfCellReach, laneOffset, topOffset));
+
+                    if (hasPreviousCell && ShouldOccludeGuidePipelineTransition(previousCell, currentCell))
+                        flowData.AddOccludedInterval(crossingStartDistance, crossingEndDistance);
+                }
+
+                flowData.AddPointWithStructuralClamps(
+                    ResolveGuidePipelineAnchorWorldPosition(currentCell, conduitHeight, channelWidth, laneOffset, topOffset),
+                    clampHalfLength,
+                    clampSpacingDivisor);
+
+                if (IsStraightGuidePipelineCell(currentCell))
+                    flowData.AddOccludedInterval(flowData.CurrentDistance - clampHalfLength, flowData.CurrentDistance + clampHalfLength);
+            }
+
+            return flowData;
+        }
+
+        static bool IsStraightGuidePipelineCell(MazeCellData cell)
+        {
+            if (cell == null)
+                return false;
+
+            bool eastWest = cell.GuidePipelineConnections.HasFlag(MazeCellConnection.East)
+                && cell.GuidePipelineConnections.HasFlag(MazeCellConnection.West)
+                && !cell.GuidePipelineConnections.HasFlag(MazeCellConnection.North)
+                && !cell.GuidePipelineConnections.HasFlag(MazeCellConnection.South);
+            bool northSouth = cell.GuidePipelineConnections.HasFlag(MazeCellConnection.North)
+                && cell.GuidePipelineConnections.HasFlag(MazeCellConnection.South)
+                && !cell.GuidePipelineConnections.HasFlag(MazeCellConnection.East)
+                && !cell.GuidePipelineConnections.HasFlag(MazeCellConnection.West);
+            return eastWest || northSouth;
+        }
+
+        static bool ShouldOccludeGuidePipelineTransition(MazeCellData previousCell, MazeCellData currentCell)
+        {
+            if (previousCell == null || currentCell == null)
+                return false;
+
+            MazeCellConnection previousConnection = MazeLayout.ResolveConnectionFlag(previousCell.GridPosition, currentCell.GridPosition);
+            MazeCellConnection currentConnection = MazeLayout.ResolveConnectionFlag(currentCell.GridPosition, previousCell.GridPosition);
+            if (previousConnection == MazeCellConnection.None || currentConnection == MazeCellConnection.None)
+                return false;
+
+            return !previousCell.Connections.HasFlag(previousConnection)
+                || !currentCell.Connections.HasFlag(currentConnection)
+                || previousCell.HiddenDoorConnections.HasFlag(previousConnection)
+                || currentCell.HiddenDoorConnections.HasFlag(currentConnection);
+        }
+
+        Dictionary<Vector2Int, MazeCellData> BuildGuidePipelineCellLookup(MazeLayout layout)
+        {
+            var guideCells = new Dictionary<Vector2Int, MazeCellData>();
+            if (layout == null)
+                return guideCells;
+
+            for (int i = 0; i < layout.Cells.Count; i++)
+            {
+                MazeCellData cell = layout.Cells[i];
+                if (cell != null && cell.GuidePipelineConnections != MazeCellConnection.None)
+                    guideCells[cell.GridPosition] = cell;
+            }
+
+            return guideCells;
+        }
+
+        static Dictionary<Vector2Int, List<Vector2Int>> BuildGuidePipelineAdjacency(IReadOnlyDictionary<Vector2Int, MazeCellData> guideCells)
+        {
+            var adjacency = new Dictionary<Vector2Int, List<Vector2Int>>();
+            if (guideCells == null)
+                return adjacency;
+
+            foreach (KeyValuePair<Vector2Int, MazeCellData> entry in guideCells)
+            {
+                Vector2Int position = entry.Key;
+                MazeCellData cell = entry.Value;
+                var neighbors = new List<Vector2Int>(4);
+                TryAddGuidePipelineNeighbor(guideCells, cell, MazeCellConnection.North, neighbors);
+                TryAddGuidePipelineNeighbor(guideCells, cell, MazeCellConnection.East, neighbors);
+                TryAddGuidePipelineNeighbor(guideCells, cell, MazeCellConnection.South, neighbors);
+                TryAddGuidePipelineNeighbor(guideCells, cell, MazeCellConnection.West, neighbors);
+                adjacency[position] = neighbors;
+            }
+
+            return adjacency;
+        }
+
+        static void TryAddGuidePipelineNeighbor(
+            IReadOnlyDictionary<Vector2Int, MazeCellData> guideCells,
+            MazeCellData cell,
+            MazeCellConnection connection,
+            ICollection<Vector2Int> neighbors)
+        {
+            if (guideCells == null || cell == null || neighbors == null || !cell.GuidePipelineConnections.HasFlag(connection))
+                return;
+
+            Vector2Int neighborPosition = cell.GridPosition + ResolveConnectionDirection(connection);
+            if (guideCells.ContainsKey(neighborPosition))
+                neighbors.Add(neighborPosition);
+        }
+
+        static List<Vector2Int> BuildGuidePipelineEndpoints(Dictionary<Vector2Int, List<Vector2Int>> adjacency)
+        {
+            var endpoints = new List<Vector2Int>();
+            if (adjacency == null)
+                return endpoints;
+
+            foreach (KeyValuePair<Vector2Int, List<Vector2Int>> entry in adjacency)
+            {
+                if (entry.Value == null || entry.Value.Count <= 1)
+                    endpoints.Add(entry.Key);
+            }
+
+            return endpoints;
+        }
+
+        static Vector2Int ResolveGuidePipelineGoalPosition(MazeLayout layout)
+        {
+            if (layout != null)
+            {
+                for (int i = 0; i < layout.Cells.Count; i++)
+                {
+                    MazeCellData cell = layout.Cells[i];
+                    if (cell != null && cell.Role == MazeCellRole.Goal)
+                        return cell.GridPosition;
+                }
+
+                if (layout.MainPath != null && layout.MainPath.Count > 0)
+                    return layout.MainPath[layout.MainPath.Count - 1];
+            }
+
+            return Vector2Int.zero;
+        }
+
+        static Vector2Int SelectGuidePipelineEndpoint(IReadOnlyList<Vector2Int> candidates, Vector2Int goalPosition, bool preferClosest)
+        {
+            if (candidates == null || candidates.Count == 0)
+                return Vector2Int.zero;
+
+            Vector2Int selected = candidates[0];
+            int selectedDistance = Mathf.Abs(selected.x - goalPosition.x) + Mathf.Abs(selected.y - goalPosition.y);
+            for (int i = 1; i < candidates.Count; i++)
+            {
+                Vector2Int candidate = candidates[i];
+                int distance = Mathf.Abs(candidate.x - goalPosition.x) + Mathf.Abs(candidate.y - goalPosition.y);
+                bool shouldSelect = preferClosest
+                    ? distance < selectedDistance
+                    : distance > selectedDistance;
+                if (!shouldSelect)
+                    continue;
+
+                selected = candidate;
+                selectedDistance = distance;
+            }
+
+            return selected;
+        }
+
+        static List<Vector2Int> FindGuidePipelineCellPath(
+            Dictionary<Vector2Int, List<Vector2Int>> adjacency,
+            Vector2Int start,
+            Vector2Int target)
+        {
+            var path = new List<Vector2Int>();
+            if (adjacency == null || !adjacency.ContainsKey(start) || !adjacency.ContainsKey(target))
+                return path;
+
+            var frontier = new Queue<Vector2Int>();
+            var visited = new HashSet<Vector2Int> { start };
+            var previous = new Dictionary<Vector2Int, Vector2Int>();
+            frontier.Enqueue(start);
+
+            while (frontier.Count > 0)
+            {
+                Vector2Int current = frontier.Dequeue();
+                if (current == target)
+                    break;
+
+                List<Vector2Int> neighbors = adjacency[current];
+                for (int i = 0; i < neighbors.Count; i++)
+                {
+                    Vector2Int neighbor = neighbors[i];
+                    if (!visited.Add(neighbor))
+                        continue;
+
+                    previous[neighbor] = current;
+                    frontier.Enqueue(neighbor);
+                }
+            }
+
+            if (start != target && !previous.ContainsKey(target))
+                return path;
+
+            Vector2Int step = target;
+            path.Add(step);
+            while (step != start)
+            {
+                step = previous[step];
+                path.Add(step);
+            }
+
+            path.Reverse();
+            return path;
+        }
+
+        Vector3 ResolveGuidePipelineAnchorWorldPosition(
+            MazeCellData cell,
+            float conduitHeight,
+            float channelWidth,
+            float laneOffset,
+            float topOffset)
+        {
+            if (cell == null)
+                return Vector3.zero;
+
+            bool hasHorizontal = cell.GuidePipelineConnections.HasFlag(MazeCellConnection.East)
+                || cell.GuidePipelineConnections.HasFlag(MazeCellConnection.West);
+            bool hasVertical = cell.GuidePipelineConnections.HasFlag(MazeCellConnection.North)
+                || cell.GuidePipelineConnections.HasFlag(MazeCellConnection.South);
+            float horizontalLaneZ = ResolveGuidePipelineHorizontalLaneZ(cell, laneOffset);
+            float verticalLaneX = ResolveGuidePipelineVerticalLaneX(cell, laneOffset);
+            float y = ResolveGuidePipelineFlowHeight(conduitHeight, topOffset);
+
+            Vector3 localPosition = hasHorizontal && !hasVertical
+                ? new Vector3(0f, y, horizontalLaneZ)
+                : hasVertical && !hasHorizontal
+                    ? new Vector3(verticalLaneX, y, 0f)
+                    : new Vector3(verticalLaneX, y, horizontalLaneZ);
+            return ResolveCellWorldPosition(cell.GridPosition) + localPosition;
+        }
+
+        Vector3 ResolveGuidePipelineConnectionWorldPosition(
+            MazeCellData cell,
+            Vector2Int direction,
+            float conduitHeight,
+            float channelWidth,
+            float halfCellReach,
+            float laneOffset,
+            float topOffset)
+        {
+            if (cell == null)
+                return Vector3.zero;
+
+            float horizontalLaneZ = ResolveGuidePipelineHorizontalLaneZ(cell, laneOffset);
+            float verticalLaneX = ResolveGuidePipelineVerticalLaneX(cell, laneOffset);
+            float y = ResolveGuidePipelineFlowHeight(conduitHeight, topOffset);
+            Vector3 localPosition = direction.x != 0
+                ? new Vector3(Mathf.Sign(direction.x) * halfCellReach, y, horizontalLaneZ)
+                : new Vector3(verticalLaneX, y, Mathf.Sign(direction.y) * halfCellReach);
+            return ResolveCellWorldPosition(cell.GridPosition) + localPosition;
+        }
+
+        static float ResolveGuidePipelineFlowHeight(float conduitHeight, float topOffset)
+        {
+            return topOffset + conduitHeight * 0.76f;
+        }
+
+        void AddGuidePipelineFlowPoint(List<Vector3> path, Vector3 point)
+        {
+            if (path == null)
+                return;
+
+            if (path.Count > 0 && Vector3.Distance(path[path.Count - 1], point) <= 0.02f)
+                return;
+
+            path.Add(point);
+        }
+
+        sealed class GuidePipelineFlowBuildResult
+        {
+            public readonly List<Vector3> Points = new();
+            public readonly List<Vector2> OccludedIntervals = new();
+
+            public float CurrentDistance { get; private set; }
+
+            public float AddPoint(Vector3 point)
+            {
+                if (Points.Count > 0)
+                {
+                    Vector3 previousPoint = Points[Points.Count - 1];
+                    if (Vector3.Distance(previousPoint, point) <= 0.02f)
+                        return CurrentDistance;
+
+                    CurrentDistance += Vector3.Distance(previousPoint, point);
+                }
+
+                Points.Add(point);
+                return CurrentDistance;
+            }
+
+            public float AddPointWithStructuralClamps(Vector3 point, float clampHalfLength, float clampSpacingDivisor)
+            {
+                float segmentStartDistance = CurrentDistance;
+                if (Points.Count > 0)
+                {
+                    Vector3 previousPoint = Points[Points.Count - 1];
+                    float segmentLength = Vector3.Distance(previousPoint, point);
+                    if (segmentLength <= 0.02f)
+                        return CurrentDistance;
+
+                    CurrentDistance += segmentLength;
+                    Points.Add(point);
+                    AddStructuralClampOcclusions(segmentStartDistance, CurrentDistance, segmentLength, clampHalfLength, clampSpacingDivisor);
+                    return CurrentDistance;
+                }
+
+                Points.Add(point);
+                return CurrentDistance;
+            }
+
+            public void AddOccludedInterval(float startDistance, float endDistance)
+            {
+                float start = Mathf.Min(startDistance, endDistance);
+                float end = Mathf.Max(startDistance, endDistance);
+                if (end - start > 0.02f)
+                    OccludedIntervals.Add(new Vector2(start, end));
+            }
+
+            void AddStructuralClampOcclusions(
+                float segmentStartDistance,
+                float segmentEndDistance,
+                float segmentLength,
+                float clampHalfLength,
+                float clampSpacingDivisor)
+            {
+                if (segmentLength <= 0.04f)
+                    return;
+
+                int clampCount = ResolveGuidePipelineClampCount(segmentLength, clampSpacingDivisor);
+                if (clampCount <= 0)
+                    return;
+
+                float halfLength = Mathf.Max(0.01f, clampHalfLength);
+                for (int i = 1; i <= clampCount; i++)
+                {
+                    float t = i / (clampCount + 1f);
+                    float centerDistance = Mathf.Lerp(segmentStartDistance, segmentEndDistance, t);
+                    AddOccludedInterval(centerDistance - halfLength, centerDistance + halfLength);
+                }
+            }
+        }
+
+        void ResolveGuidePipelineVisualMetrics(
+            out float conduitHeight,
+            out float channelWidth,
+            out float coreWidth,
+            out float halfCellReach,
+            out float laneOffset,
+            out float topOffset)
+        {
+            conduitHeight = Mathf.Clamp(m_FloorRidgeHeight * 0.5f, 0.012f, Mathf.Max(0.012f, m_FloorThickness * 0.28f));
+            channelWidth = Mathf.Clamp(m_FloorRidgeWidth * 2.8f, 0.16f, Mathf.Max(0.16f, m_CellSize * 0.11f));
+            coreWidth = Mathf.Clamp(channelWidth * Mathf.Clamp(m_FloorRidgeSpacing, 0.28f, 0.62f), 0.055f, channelWidth * 0.5f);
+            halfCellReach = Mathf.Clamp(
+                m_FloorRidgeLength,
+                Mathf.Max(0.1f, m_CellSize * 0.25f),
+                Mathf.Max(0.1f, m_CellSize * 0.5f + channelWidth * 0.55f));
+            laneOffset = Mathf.Clamp(
+                m_CellSize * 0.5f - Mathf.Max(channelWidth, m_GuidePipelineEdgeInset),
+                m_CellSize * 0.18f,
+                m_CellSize * 0.44f);
+            topOffset = conduitHeight * 0.5f + 0.018f;
+        }
+
+        float ResolveGuidePipelineClampSpacing()
+        {
+            return Mathf.Max(0.45f, m_CellSize * 0.34f);
+        }
+
+        static int ResolveGuidePipelineClampCount(float segmentLength, float clampSpacing)
+        {
+            float safeSpacing = Mathf.Max(0.45f, clampSpacing);
+            if (segmentLength < safeSpacing * GuidePipelineClampMinSegmentSpacingRatio)
+                return 0;
+
+            return Mathf.Clamp(Mathf.FloorToInt(segmentLength / safeSpacing), 1, 3);
+        }
+
+        static float ResolveGuidePipelineClampOcclusionHalfLength(float coreWidth)
+        {
+            return Mathf.Max(coreWidth * 0.6f, 0.035f);
+        }
+
+        static float ResolveGuidePipelineHorizontalLaneZ(MazeCellData cell, float laneOffset)
+        {
+            return ResolveGuidePipelineHorizontalLaneSide(cell) * laneOffset;
+        }
+
+        static float ResolveGuidePipelineVerticalLaneX(MazeCellData cell, float laneOffset)
+        {
+            return ResolveGuidePipelineVerticalLaneSide(cell) * laneOffset;
+        }
+
+        static int ResolveGuidePipelineHorizontalLaneSide(MazeCellData cell)
+        {
+            if (cell == null || cell.GuidePipelineHorizontalLaneSide == 0)
+                return ResolveStableGuidePipelineSide(cell != null ? cell.GridPosition.y : 0);
+
+            return cell.GuidePipelineHorizontalLaneSide > 0 ? 1 : -1;
+        }
+
+        static int ResolveGuidePipelineVerticalLaneSide(MazeCellData cell)
+        {
+            if (cell == null || cell.GuidePipelineVerticalLaneSide == 0)
+                return ResolveStableGuidePipelineSide(cell != null ? cell.GridPosition.x : 0);
+
+            return cell.GuidePipelineVerticalLaneSide > 0 ? 1 : -1;
+        }
+
+        static int ResolveStableGuidePipelineSide(int coordinate)
+        {
+            unchecked
+            {
+                int hash = coordinate * 1103515245 + 12345;
+                return (hash & 1) == 0 ? 1 : -1;
+            }
+        }
+
         void BuildCellWalls(Transform parent, MazeLayout layout, MazeCellData cell)
         {
             TryCreateWall(parent, layout, cell, MazeCellConnection.North, Vector2Int.up);
             TryCreateWall(parent, layout, cell, MazeCellConnection.East, Vector2Int.right);
             TryCreateWall(parent, layout, cell, MazeCellConnection.South, Vector2Int.down);
             TryCreateWall(parent, layout, cell, MazeCellConnection.West, Vector2Int.left);
+
+            if (cell.TerrainVariant == MazeCellTerrainVariant.BeveledWallCorners)
+                TryCreateBeveledWallCorner(parent, layout, cell);
+        }
+
+        void TryCreateBeveledWallCorner(Transform parent, MazeLayout layout, MazeCellData cell)
+        {
+            if (parent == null || cell == null || !TryResolveBeveledCorner(layout, cell, out Vector2Int corner))
+                return;
+
+            float wallHeight = ResolveWallHeight(isBoundaryWall: false);
+            float cornerRun = Mathf.Clamp(m_BeveledCornerRun, m_WallThickness * 2f, Mathf.Max(m_WallThickness * 2f, m_CellSize * 0.45f));
+            float wallOverlapInset = Mathf.Clamp(m_WallThickness * 0.35f, 0.01f, Mathf.Max(0.01f, m_WallThickness * 0.45f));
+            float centerInset = cornerRun * 0.5f + wallOverlapInset;
+            Vector3 cellCenter = ResolveCellWorldPosition(cell.GridPosition);
+            Vector3 cornerOffset = new(
+                corner.x * (m_CellSize * 0.5f - centerInset),
+                wallHeight * 0.5f - m_FloorThickness * 0.5f,
+                corner.y * (m_CellSize * 0.5f - centerInset));
+            Vector3 wallNormal = new Vector3(corner.x, 0f, corner.y).normalized;
+            float bevelDepth = Mathf.Max(
+                m_WallThickness * 1.6f,
+                m_WallThickness * Mathf.Max(0.5f, m_BeveledCornerThicknessMultiplier));
+
+            GameObject bevelObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            bevelObject.name = $"BeveledCorner_{cell.GridPosition.x}_{cell.GridPosition.y}_{corner.x}_{corner.y}";
+            bevelObject.transform.SetParent(parent, false);
+            bevelObject.transform.SetPositionAndRotation(
+                cellCenter + cornerOffset,
+                Quaternion.LookRotation(wallNormal, Vector3.up));
+            bevelObject.transform.localScale = new Vector3(
+                cornerRun * 1.41421356f,
+                wallHeight,
+                bevelDepth);
+
+            Renderer bevelRenderer = bevelObject.GetComponent<Renderer>();
+            if (bevelRenderer != null)
+                bevelRenderer.sharedMaterial = ResolveWallMaterial();
+        }
+
+        static bool TryResolveBeveledCorner(MazeLayout layout, MazeCellData cell, out Vector2Int corner)
+        {
+            corner = Vector2Int.zero;
+            if (layout == null || cell == null)
+                return false;
+
+            List<Vector2Int> candidates = new(4);
+            TryAddInternalClosedCorner(layout, cell, MazeCellConnection.North, MazeCellConnection.East, new Vector2Int(1, 1), candidates);
+            TryAddInternalClosedCorner(layout, cell, MazeCellConnection.East, MazeCellConnection.South, new Vector2Int(1, -1), candidates);
+            TryAddInternalClosedCorner(layout, cell, MazeCellConnection.South, MazeCellConnection.West, new Vector2Int(-1, -1), candidates);
+            TryAddInternalClosedCorner(layout, cell, MazeCellConnection.West, MazeCellConnection.North, new Vector2Int(-1, 1), candidates);
+
+            if (candidates.Count == 0)
+                return false;
+
+            int hash = ComputeGridHash(cell.GridPosition);
+            if (hash < 0)
+                hash = ~hash;
+
+            corner = candidates[hash % candidates.Count];
+            return true;
+        }
+
+        static void TryAddInternalClosedCorner(
+            MazeLayout layout,
+            MazeCellData cell,
+            MazeCellConnection firstWall,
+            MazeCellConnection secondWall,
+            Vector2Int corner,
+            ICollection<Vector2Int> candidates)
+        {
+            if (layout == null || cell == null || candidates == null)
+                return;
+
+            if (!cell.Connections.HasFlag(firstWall)
+                && !cell.Connections.HasFlag(secondWall)
+                && HasNeighborInDirection(layout, cell, firstWall)
+                && HasNeighborInDirection(layout, cell, secondWall))
+            {
+                candidates.Add(corner);
+            }
+        }
+
+        static int ComputeGridHash(Vector2Int gridPosition)
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + gridPosition.x;
+                hash = hash * 31 + gridPosition.y;
+                return hash;
+            }
         }
 
         void TryCreateWall(
@@ -1389,6 +2239,25 @@ namespace CIS5680VRGame.Generation
                 : new Vector3(m_WallThickness, wallHeight, m_CellSize + m_WallThickness);
         }
 
+        static bool HasNeighborInDirection(MazeLayout layout, MazeCellData cell, MazeCellConnection connection)
+        {
+            return layout != null
+                && cell != null
+                && layout.TryGetCell(cell.GridPosition + ResolveConnectionDirection(connection), out _);
+        }
+
+        static Vector2Int ResolveConnectionDirection(MazeCellConnection connection)
+        {
+            return connection switch
+            {
+                MazeCellConnection.North => Vector2Int.up,
+                MazeCellConnection.East => Vector2Int.right,
+                MazeCellConnection.South => Vector2Int.down,
+                MazeCellConnection.West => Vector2Int.left,
+                _ => Vector2Int.zero,
+            };
+        }
+
         Vector3 ResolveHiddenDoorWorldPosition(Vector2Int gridPosition, Vector2Int direction, float wallHeight)
         {
             Vector3 wallPosition = ResolveWallWorldPosition(gridPosition, direction, wallHeight);
@@ -1551,6 +2420,60 @@ namespace CIS5680VRGame.Generation
             return m_WallRevealMaterial != null ? m_WallRevealMaterial : m_EditorPreviewWallMaterial;
         }
 
+        Material ResolveGuidePipelineBaseMaterial()
+        {
+            if (m_RuntimeGuidePipelineBaseMaterial != null)
+                return m_RuntimeGuidePipelineBaseMaterial;
+
+            Shader shader = ResolveSimpleUnlitShader();
+            if (shader == null)
+                return ResolveFloorMaterial();
+
+            m_RuntimeGuidePipelineBaseMaterial = new Material(shader)
+            {
+                name = "GeneratedGuidePipelineBaseMaterial",
+            };
+            ApplyMaterialColor(m_RuntimeGuidePipelineBaseMaterial, new Color(0.001f, 0.008f, 0.01f, 1f));
+            ApplyMaterialEmission(m_RuntimeGuidePipelineBaseMaterial, new Color(0f, 0.012f, 0.016f, 1f));
+            return m_RuntimeGuidePipelineBaseMaterial;
+        }
+
+        Material ResolveGuidePipelineGlowMaterial()
+        {
+            if (m_RuntimeGuidePipelineGlowMaterial != null)
+                return m_RuntimeGuidePipelineGlowMaterial;
+
+            Shader shader = ResolveSimpleUnlitShader();
+            if (shader == null)
+                return ResolveFloorMaterial();
+
+            m_RuntimeGuidePipelineGlowMaterial = new Material(shader)
+            {
+                name = "GeneratedGuidePipelineGlowMaterial",
+            };
+            ApplyMaterialColor(m_RuntimeGuidePipelineGlowMaterial, new Color(0.006f, 0.16f, 0.2f, 1f));
+            ApplyMaterialEmission(m_RuntimeGuidePipelineGlowMaterial, new Color(0.004f, 0.1f, 0.13f, 1f));
+            return m_RuntimeGuidePipelineGlowMaterial;
+        }
+
+        Material ResolveGuidePipelineHaloMaterial()
+        {
+            if (m_RuntimeGuidePipelineHaloMaterial != null)
+                return m_RuntimeGuidePipelineHaloMaterial;
+
+            Shader shader = ResolveSimpleUnlitShader();
+            if (shader == null)
+                return ResolveFloorMaterial();
+
+            m_RuntimeGuidePipelineHaloMaterial = new Material(shader)
+            {
+                name = "GeneratedGuidePipelineHaloMaterial",
+            };
+            ApplyMaterialColor(m_RuntimeGuidePipelineHaloMaterial, new Color(0f, 0.025f, 0.032f, 1f));
+            ApplyMaterialEmission(m_RuntimeGuidePipelineHaloMaterial, new Color(0f, 0.03f, 0.04f, 1f));
+            return m_RuntimeGuidePipelineHaloMaterial;
+        }
+
         Material ResolveHiddenDoorInteractionPointMaterial()
         {
             if (m_HiddenDoorInteractionPointMaterial != null)
@@ -1559,11 +2482,7 @@ namespace CIS5680VRGame.Generation
             if (m_RuntimeHiddenDoorInteractionPointMaterial != null)
                 return m_RuntimeHiddenDoorInteractionPointMaterial;
 
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (shader == null)
-                shader = Shader.Find("Unlit/Color");
-            if (shader == null)
-                shader = Shader.Find("Standard");
+            Shader shader = ResolveSimpleUnlitShader();
 
             if (shader == null)
                 return ResolveWallMaterial();
@@ -1576,6 +2495,17 @@ namespace CIS5680VRGame.Generation
             return m_RuntimeHiddenDoorInteractionPointMaterial;
         }
 
+        static Shader ResolveSimpleUnlitShader()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+                shader = Shader.Find("Unlit/Color");
+            if (shader == null)
+                shader = Shader.Find("Standard");
+
+            return shader;
+        }
+
         static void ApplyMaterialColor(Material material, Color color)
         {
             if (material == null)
@@ -1585,6 +2515,18 @@ namespace CIS5680VRGame.Generation
                 material.SetColor(BaseColorPropertyId, color);
             if (material.HasProperty(ColorPropertyId))
                 material.SetColor(ColorPropertyId, color);
+        }
+
+        static void ApplyMaterialEmission(Material material, Color emissionColor)
+        {
+            if (material == null)
+                return;
+
+            if (material.HasProperty(EmissionColorPropertyId))
+            {
+                material.SetColor(EmissionColorPropertyId, emissionColor);
+                material.EnableKeyword("_EMISSION");
+            }
         }
 
         void EnsureGeneratedPreviewTools(Transform grayboxRoot, Transform floorsRoot)

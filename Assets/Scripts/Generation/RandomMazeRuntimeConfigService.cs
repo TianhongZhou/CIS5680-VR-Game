@@ -298,6 +298,7 @@ namespace CIS5680VRGame.Generation
         public int fixedSeed = 12345;
         public int mazeSize = 9;
         public RandomMazeRuntimeFeatureCounts featureCounts;
+        public RandomMazeRuntimeTerrainVariants terrainVariants;
         public RandomMazeRuntimePlacementRules placementRules;
         public RandomMazeRuntimeSkeletonRules skeletonRules;
     }
@@ -310,6 +311,13 @@ namespace CIS5680VRGame.Generation
         public int trapCount = 1;
         public int rewardCount = 2;
         public int hiddenDoorCount = 1;
+    }
+
+    [Serializable]
+    public sealed class RandomMazeRuntimeTerrainVariants
+    {
+        public int beveledCornerCellCount = 6;
+        public int floorRidgeCellCount = 8;
     }
 
     [Serializable]

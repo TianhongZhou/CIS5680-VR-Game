@@ -2075,6 +2075,8 @@ MonoBehaviour:
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
   m_OverrideSharedDefaults: 0
+  m_IgnoreProgressionModifiers: 0
+  m_UnlimitedCharges: 0
   m_Charges: 2
   m_Cooldown: 20
   m_BaseRefillAmount: 50
@@ -5013,6 +5015,8 @@ MonoBehaviour:
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
   m_OverrideSharedDefaults: 0
+  m_IgnoreProgressionModifiers: 0
+  m_UnlimitedCharges: 0
   m_Charges: 2
   m_Cooldown: 20
   m_BaseRefillAmount: 50
@@ -9816,6 +9820,8 @@ MonoBehaviour:
   m_PlayerRig: {fileID: 988933499}
   m_PlayerEnergy: {fileID: 0}
   m_OverrideSharedDefaults: 0
+  m_IgnoreProgressionModifiers: 0
+  m_UnlimitedCharges: 0
   m_Charges: 2
   m_Cooldown: 20
   m_BaseRefillAmount: 50
@@ -18612,6 +18618,9 @@ MonoBehaviour:
   m_UvScale: 1
   m_IncludeBoundaryWalls: 1
   m_IncludeWallTopFaces: 0
+  m_ExcludedColliderNameContains:
+  - _Gate
+  - TeleportBlocker
 --- !u!1 &1863115616
 GameObject:
   m_ObjectHideFlags: 0
@@ -21049,6 +21058,10 @@ MonoBehaviour:
   m_TutorialCancelButtonSize: {x: 240, y: 56}
   m_TutorialChoiceButtonFontSize: 24
   m_TutorialCancelButtonFontSize: 24
+  m_MenuWorldOffset: {x: 0, y: -0.44, z: 2}
+  m_UseFixedWorldMenu: 1
+  m_FixedWorldMenuAnchor: {fileID: 0}
+  m_FixedWorldMenuAnchorName: MainMenuAnchor
   m_PanelAnchor: {x: 0.34, y: 0.52}
   m_PanelOffset: {x: 180, y: -160}
   m_CanvasPlaneDistance: 0.8

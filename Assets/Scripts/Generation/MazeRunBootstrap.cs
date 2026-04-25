@@ -96,6 +96,10 @@ namespace CIS5680VRGame.Generation
         [SerializeField] int m_RewardCount = 2;
         [SerializeField] int m_HiddenDoorCount = 1;
 
+        [Header("Terrain Variants")]
+        [SerializeField, Min(0)] int m_BeveledCornerCellCount = 6;
+        [SerializeField, Min(0)] int m_FloorRidgeCellCount = 8;
+
         [Header("Enemy Prototype")]
         [SerializeField, Min(0)] int m_PrototypeEnemyCount = 1;
 
@@ -164,6 +168,8 @@ namespace CIS5680VRGame.Generation
         public int TrapCount => m_TrapCount;
         public int RewardCount => m_RewardCount;
         public int HiddenDoorCount => m_HiddenDoorCount;
+        public int BeveledCornerCellCount => m_BeveledCornerCellCount;
+        public int FloorRidgeCellCount => m_FloorRidgeCellCount;
         public int PrototypeEnemyCount => m_PrototypeEnemyCount;
         public int MinSameTypeCellDistance => m_MinSameTypeCellDistance;
         public int MinCrossTypeCellDistance => m_MinCrossTypeCellDistance;
@@ -477,6 +483,12 @@ namespace CIS5680VRGame.Generation
                 m_HiddenDoorCount = Mathf.Max(0, profile.featureCounts.hiddenDoorCount);
             }
 
+            if (profile.terrainVariants != null)
+            {
+                m_BeveledCornerCellCount = Mathf.Max(0, profile.terrainVariants.beveledCornerCellCount);
+                m_FloorRidgeCellCount = Mathf.Max(0, profile.terrainVariants.floorRidgeCellCount);
+            }
+
             if (profile.placementRules != null)
             {
                 m_MinSameTypeCellDistance = Mathf.Max(0, profile.placementRules.minSameTypeCellDistance);
@@ -521,6 +533,9 @@ namespace CIS5680VRGame.Generation
                     m_TrapCount,
                     m_RewardCount,
                     m_HiddenDoorCount);
+                m_Generator.ApplyTerrainVariantProfile(
+                    m_BeveledCornerCellCount,
+                    m_FloorRidgeCellCount);
                 m_Generator.ApplyPlacementRuleProfile(
                     m_MinSameTypeCellDistance,
                     m_MinCrossTypeCellDistance,
@@ -563,6 +578,8 @@ namespace CIS5680VRGame.Generation
             ValidateNonNegative(errors, "Trap Count", m_TrapCount);
             ValidateNonNegative(errors, "Reward Count", m_RewardCount);
             ValidateNonNegative(errors, "Hidden Door Count", m_HiddenDoorCount);
+            ValidateNonNegative(errors, "Beveled Corner Cell Count", m_BeveledCornerCellCount);
+            ValidateNonNegative(errors, "Guide Pipeline Cell Count", m_FloorRidgeCellCount);
             ValidateNonNegative(errors, "Prototype Enemy Count", m_PrototypeEnemyCount);
             ValidateNonNegative(errors, "Min Same-Type Cell Distance", m_MinSameTypeCellDistance);
             ValidateNonNegative(errors, "Min Cross-Type Cell Distance", m_MinCrossTypeCellDistance);
@@ -710,6 +727,11 @@ namespace CIS5680VRGame.Generation
                     trapCount = m_TrapCount,
                     rewardCount = m_RewardCount,
                     hiddenDoorCount = m_HiddenDoorCount,
+                },
+                terrainVariants = new MazeTerrainVariantExport
+                {
+                    beveledCornerCellCount = m_BeveledCornerCellCount,
+                    floorRidgeCellCount = m_FloorRidgeCellCount,
                 },
                 placementRules = new MazePlacementRuleExport
                 {
@@ -1121,6 +1143,7 @@ namespace CIS5680VRGame.Generation
             public string lastGeneratedMainPathBuildMode;
             public int mazeSize;
             public MazeFeatureCountExport featureCounts;
+            public MazeTerrainVariantExport terrainVariants;
             public MazePlacementRuleExport placementRules;
             public MazeSkeletonRuleExport skeletonRules;
             public MazeDerivedProfileExport derivedProfile;
@@ -1136,6 +1159,13 @@ namespace CIS5680VRGame.Generation
             public int trapCount;
             public int rewardCount;
             public int hiddenDoorCount;
+        }
+
+        [System.Serializable]
+        sealed class MazeTerrainVariantExport
+        {
+            public int beveledCornerCellCount;
+            public int floorRidgeCellCount;
         }
 
         [System.Serializable]
@@ -1259,6 +1289,8 @@ namespace CIS5680VRGame.Generation
             EditorGUILayout.LabelField("Start Safe Distance", bootstrap.StartSafeDistance.ToString());
             EditorGUILayout.LabelField("Goal Safe Distance", bootstrap.GoalSafeDistance.ToString());
             EditorGUILayout.LabelField("Reward Min Branch Depth", bootstrap.RewardMinBranchDepth.ToString());
+            EditorGUILayout.LabelField("Beveled Corner Cells", bootstrap.BeveledCornerCellCount.ToString());
+            EditorGUILayout.LabelField("Guide Pipeline Cells", bootstrap.FloorRidgeCellCount.ToString());
             EditorGUILayout.LabelField("Branch-Free Start Cells", bootstrap.BranchFreeStartCells.ToString());
             EditorGUILayout.LabelField("Preferred Straight Start Cells", bootstrap.PreferredStraightStartCells.ToString());
             EditorGUILayout.LabelField("Path Zones", $"Start {startZoneInteriorCells + 1} / Mid {midZoneInteriorCells} / Late {lateZoneInteriorCells + 1}");

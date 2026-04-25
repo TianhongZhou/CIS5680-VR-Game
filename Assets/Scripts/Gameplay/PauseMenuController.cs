@@ -38,6 +38,11 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Vector3 m_MenuWorldOffset = new(0f, -0.36f, 2f);
         [SerializeField] Vector2 m_PanelOffset = new(0f, -80f);
 
+        [Header("Safe Placement")]
+        [SerializeField] LayerMask m_MenuPlacementObstacleMask = default;
+        [SerializeField, Min(0.55f)] float m_MenuPlacementMinimumDistance = 0.9f;
+        [SerializeField, Min(0.05f)] float m_MenuPlacementWallClearance = 0.28f;
+
         [Header("Pause Input")]
         [SerializeField] XRNode m_ControllerNode = XRNode.LeftHand;
         [SerializeField] ControllerButton m_ControllerButton = ControllerButton.SecondaryButton;
@@ -136,7 +141,14 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             Camera menuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
-            ModalMenuPauseUtility.RefreshWorldMenuPose(m_MenuRoot, menuCamera, m_MenuWorldOffset);
+            ModalMenuPauseUtility.RefreshWorldMenuPoseSafely(
+                m_MenuRoot,
+                menuCamera,
+                m_MenuWorldOffset,
+                ResolveMenuSize(),
+                ResolveMenuPlacementObstacleMask(),
+                m_MenuPlacementMinimumDistance,
+                m_MenuPlacementWallClearance);
             m_MenuRoot.SetActive(true);
             RefreshMenuLayout();
             m_IsPauseMenuOpen = true;
@@ -317,6 +329,26 @@ namespace CIS5680VRGame.Gameplay
                 preferredSize,
                 k_PauseMenuSafePadding,
                 k_MinPauseMenuSize);
+        }
+
+        LayerMask ResolveMenuPlacementObstacleMask()
+        {
+            int mask = m_MenuPlacementObstacleMask.value;
+            if (mask == 0)
+            {
+                int defaultLayer = LayerMask.NameToLayer("Default");
+                mask = defaultLayer >= 0 ? 1 << defaultLayer : Physics.DefaultRaycastLayers;
+            }
+
+            int uiLayer = LayerMask.NameToLayer("UI");
+            if (uiLayer >= 0)
+                mask &= ~(1 << uiLayer);
+
+            int groundLayer = LayerMask.NameToLayer("Ground");
+            if (groundLayer >= 0)
+                mask &= ~(1 << groundLayer);
+
+            return mask;
         }
 
         void RefreshMenuLayout()

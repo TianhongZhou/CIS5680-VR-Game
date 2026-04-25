@@ -32,6 +32,9 @@ namespace CIS5680VRGame.UI
         [SerializeField] float m_TutorialChoiceButtonFontSize = 26f;
         [SerializeField] float m_TutorialCancelButtonFontSize = 24f;
         [SerializeField] Vector3 m_MenuWorldOffset = new(0f, -0.44f, 2f);
+        [SerializeField] bool m_UseFixedWorldMenu = true;
+        [SerializeField] Transform m_FixedWorldMenuAnchor;
+        [SerializeField] string m_FixedWorldMenuAnchorName = "MainMenuAnchor";
         [SerializeField] Vector2 m_PanelAnchor = new(0.34f, 0.52f);
         [SerializeField] Vector2 m_PanelOffset = Vector2.zero;
         [SerializeField] float m_CanvasPlaneDistance = 1.05f;
@@ -44,6 +47,7 @@ namespace CIS5680VRGame.UI
         TextMeshProUGUI m_GoldSummaryLabel;
         AudioSource m_BackgroundMusicSource;
         AudioClip m_BackgroundMusicClip;
+        Transform m_RuntimeFixedWorldMenuAnchor;
 
         void Reset()
         {
@@ -67,13 +71,15 @@ namespace CIS5680VRGame.UI
             if (m_BackgroundMusicSource != null)
                 m_BackgroundMusicSource.Stop();
 
-            if (m_MenuRoot == null)
-                return;
+            if (m_MenuRoot != null)
+            {
+                if (Application.isPlaying)
+                    Destroy(m_MenuRoot);
+                else
+                    DestroyImmediate(m_MenuRoot);
+            }
 
-            if (Application.isPlaying)
-                Destroy(m_MenuRoot);
-            else
-                DestroyImmediate(m_MenuRoot);
+            DestroyRuntimeFixedWorldMenuAnchor();
         }
 
         void ResolvePlayerRig()
@@ -425,6 +431,9 @@ namespace CIS5680VRGame.UI
                 return;
 
             ModalMenuPauseUtility.ConfigureWorldSpaceMenuRoot(m_MenuRoot, menuCamera, ResolveMenuWorldOffset());
+
+            if (m_UseFixedWorldMenu)
+                PinMenuToFixedWorldAnchor(menuCamera);
         }
 
         RectTransform ResolvePanelRect()
@@ -442,6 +451,88 @@ namespace CIS5680VRGame.UI
             if (offset.z <= 0f)
                 offset.z = Mathf.Max(m_CanvasPlaneDistance, ModalMenuPauseUtility.WorldMenuLocalOffset.z);
             return offset;
+        }
+
+        void PinMenuToFixedWorldAnchor(Camera menuCamera)
+        {
+            if (m_MenuRoot == null)
+                return;
+
+            Transform anchor = ResolveFixedWorldMenuAnchor(menuCamera);
+            if (anchor == null)
+            {
+                m_MenuRoot.transform.SetParent(null, true);
+                return;
+            }
+
+            m_MenuRoot.transform.SetParent(anchor, false);
+            m_MenuRoot.transform.localPosition = Vector3.zero;
+            m_MenuRoot.transform.localRotation = Quaternion.identity;
+            m_MenuRoot.transform.localScale = Vector3.one * ModalMenuPauseUtility.WorldMenuUnitsPerPixel;
+        }
+
+        Transform ResolveFixedWorldMenuAnchor(Camera menuCamera)
+        {
+            if (m_FixedWorldMenuAnchor != null)
+                return m_FixedWorldMenuAnchor;
+
+            if (!string.IsNullOrWhiteSpace(m_FixedWorldMenuAnchorName))
+            {
+                GameObject anchorObject = GameObject.Find(m_FixedWorldMenuAnchorName);
+                if (anchorObject != null)
+                {
+                    m_FixedWorldMenuAnchor = anchorObject.transform;
+                    return m_FixedWorldMenuAnchor;
+                }
+            }
+
+            if (m_RuntimeFixedWorldMenuAnchor != null)
+                return m_RuntimeFixedWorldMenuAnchor;
+
+            if (menuCamera == null)
+                return null;
+
+            GameObject runtimeAnchorObject = new("RuntimeMainMenuAnchor");
+            m_RuntimeFixedWorldMenuAnchor = runtimeAnchorObject.transform;
+            Pose initialPose = ResolveInitialFixedWorldMenuPose(menuCamera);
+            m_RuntimeFixedWorldMenuAnchor.SetPositionAndRotation(initialPose.position, initialPose.rotation);
+            return m_RuntimeFixedWorldMenuAnchor;
+        }
+
+        Pose ResolveInitialFixedWorldMenuPose(Camera menuCamera)
+        {
+            Quaternion yawRotation = ResolveYawRotation(menuCamera != null ? menuCamera.transform : null);
+            Vector3 origin = menuCamera != null ? menuCamera.transform.position : transform.position;
+            Vector3 worldPosition = origin + yawRotation * ResolveMenuWorldOffset();
+            return new Pose(worldPosition, yawRotation);
+        }
+
+        Quaternion ResolveYawRotation(Transform source)
+        {
+            Vector3 forward = source != null ? source.forward : Vector3.forward;
+            forward = Vector3.ProjectOnPlane(forward, Vector3.up);
+
+            if (forward.sqrMagnitude < 0.0001f && m_PlayerRig != null)
+                forward = Vector3.ProjectOnPlane(m_PlayerRig.transform.forward, Vector3.up);
+
+            if (forward.sqrMagnitude < 0.0001f)
+                forward = Vector3.forward;
+
+            return Quaternion.LookRotation(forward.normalized, Vector3.up);
+        }
+
+        void DestroyRuntimeFixedWorldMenuAnchor()
+        {
+            if (m_RuntimeFixedWorldMenuAnchor == null)
+                return;
+
+            GameObject anchorObject = m_RuntimeFixedWorldMenuAnchor.gameObject;
+            m_RuntimeFixedWorldMenuAnchor = null;
+
+            if (Application.isPlaying)
+                Destroy(anchorObject);
+            else
+                DestroyImmediate(anchorObject);
         }
 
         Vector2 ResolveMenuSize()

@@ -18,6 +18,10 @@
         "rewardCount": 5,
         "hiddenDoorCount": 3
     },
+    "terrainVariants": {
+        "beveledCornerCellCount": 10,
+        "floorRidgeCellCount": 14
+    },
     "placementRules": {
         "minSameTypeCellDistance": 4,
         "minCrossTypeCellDistance": 2,

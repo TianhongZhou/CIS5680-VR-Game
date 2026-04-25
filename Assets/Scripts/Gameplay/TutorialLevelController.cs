@@ -49,6 +49,10 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField, Min(1)] int m_HealthMissingForRefillLesson = 1;
         [SerializeField, Min(0f)] float m_HealthRefillFallbackCompletionDelay = 30f;
 
+        [Header("Guide Pipeline Hint")]
+        [SerializeField] bool m_CreateGuidePipelineHint = true;
+        [SerializeField, Min(0f)] float m_GuidePipelineHintFloorSurfaceY = 0.04f;
+
         GameObject m_MessageRoot;
         RectTransform m_MessagePanelRect;
         TextMeshProUGUI m_MessageTitle;
@@ -60,6 +64,7 @@ namespace CIS5680VRGame.Gameplay
         MovementModeManager.MovementMode m_InitialMovementMode;
         Collider m_SonarTargetVolume;
         TeleportBallLauncher m_TeleportLauncher;
+        TutorialGuidePipelineHint m_GuidePipelineHint;
         Coroutine m_DelayedStepCompletionRoutine;
         readonly Dictionary<string, GameObject> m_TutorialObjects = new();
         readonly List<BallHolsterSlot> m_TutorialBallSlots = new();
@@ -87,6 +92,7 @@ namespace CIS5680VRGame.Gameplay
             ResolveReferences();
             EnsureMessageUI();
             ResolveTutorialObjects();
+            EnsureGuidePipelineHint();
             ApplyInitialSceneState();
         }
 
@@ -479,7 +485,7 @@ namespace CIS5680VRGame.Gameplay
 
                 TutorialStep.Locator => (
                     "Find the Exit Direction",
-                    "Stop at the fork and listen for the exit ambience.\nTurn toward the sound, then push the right thumbstick forward to scan up to 30m."),
+                    "Stop at the fork and listen for the exit ambience.\nFaint blue conduits can hint at the exit direction, but they may pass through walls.\nTurn toward the sound, then push the right thumbstick forward to scan up to 30m."),
 
                 TutorialStep.EnemyChase => (
                     "Enemy Alert",
@@ -645,6 +651,61 @@ namespace CIS5680VRGame.Gameplay
             enemyController.SetPursuitLockDistanceMultiplier(4f);
             enemyController.SetFieldOfViewMultiplier(4f);
             enemyController.ForceChaseTarget(targetPosition);
+        }
+
+        void EnsureGuidePipelineHint()
+        {
+            if (!m_CreateGuidePipelineHint)
+                return;
+
+            const string guidePipelineHintName = "TutorialGuidePipelineHint";
+            GameObject hintObject = GameObject.Find(guidePipelineHintName);
+            if (hintObject == null)
+            {
+                hintObject = new GameObject(guidePipelineHintName);
+                hintObject.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                hintObject.transform.localScale = Vector3.one;
+            }
+
+            m_GuidePipelineHint = hintObject.GetComponent<TutorialGuidePipelineHint>();
+            if (m_GuidePipelineHint == null)
+                m_GuidePipelineHint = hintObject.AddComponent<TutorialGuidePipelineHint>();
+
+            m_GuidePipelineHint.Configure(BuildGuidePipelineHintPath(), m_GuidePipelineHintFloorSurfaceY);
+        }
+
+        List<Vector3> BuildGuidePipelineHintPath()
+        {
+            Vector3 locatorPosition = ResolveTutorialObjectPosition("Step07_Beacon", new Vector3(0.56f, 0f, 24.75f));
+            Vector3 enemyMessagePosition = ResolveTutorialObjectPosition("Step08_Enemy_Message", new Vector3(5f, 0f, 25.4f));
+            Vector3 goalPosition = m_TutorialGoal != null ? m_TutorialGoal.transform.position : new Vector3(14f, 0f, 25f);
+
+            float startX = locatorPosition.x + 0.75f;
+            float bendX = Mathf.Min(goalPosition.x - 6f, Mathf.Max(startX + 2.4f, enemyMessagePosition.x));
+            float endX = Mathf.Clamp(goalPosition.x - 2.5f, bendX + 3f, goalPosition.x - 1.25f);
+            float nearWallZ = locatorPosition.z - 0.65f;
+            float goalSideZ = goalPosition.z - 0.45f;
+            float bendZ = Mathf.Lerp(nearWallZ, goalSideZ, 0.7f);
+
+            return new List<Vector3>
+            {
+                new(startX, 0f, nearWallZ),
+                new(bendX, 0f, nearWallZ),
+                new(bendX, 0f, bendZ),
+                new(endX, 0f, bendZ),
+            };
+        }
+
+        Vector3 ResolveTutorialObjectPosition(string objectName, Vector3 fallback)
+        {
+            if (!string.IsNullOrWhiteSpace(objectName)
+                && m_TutorialObjects.TryGetValue(objectName, out GameObject targetObject)
+                && targetObject != null)
+            {
+                return targetObject.transform.position;
+            }
+
+            return fallback;
         }
 
         Vector3 ResolvePlayerAnchorPosition()
