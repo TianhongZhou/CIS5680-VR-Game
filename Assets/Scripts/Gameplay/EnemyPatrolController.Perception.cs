@@ -1,6 +1,4 @@
 ﻿using System.Collections.Generic;
-using CIS5680VRGame.Generation;
-using Unity.XR.CoreUtils;
 using UnityEngine;
 
 namespace CIS5680VRGame.Gameplay
@@ -9,23 +7,7 @@ namespace CIS5680VRGame.Gameplay
     {
         void ResolvePlayerReferences()
         {
-            if (m_PlayerRig == null)
-                m_PlayerRig = FindObjectOfType<XROrigin>();
-
-            if (m_PlayerRig != null && m_PlayerView == null)
-            {
-                if (m_PlayerRig.Camera != null)
-                    m_PlayerView = m_PlayerRig.Camera.transform;
-                else
-                {
-                    Camera rigCamera = m_PlayerRig.GetComponentInChildren<Camera>(true);
-                    if (rigCamera != null)
-                        m_PlayerView = rigCamera.transform;
-                }
-            }
-
-            if (m_PlayerView == null && Camera.main != null)
-                m_PlayerView = Camera.main.transform;
+            EnemyPerceptionSensor.ResolvePlayerReferences(ref m_PlayerRig, ref m_PlayerView);
         }
 
         void UpdateAwareness()
@@ -108,39 +90,35 @@ namespace CIS5680VRGame.Gameplay
 
         bool TryGetPursuitLockPlayerPosition(out Vector3 playerGroundPosition)
         {
-            playerGroundPosition = transform.position;
-            if (m_State == EnemyState.Patrol || m_PlayerView == null || EffectivePursuitLockDistance <= 0f)
-                return false;
-
-            Vector3 sensorPosition = GetSensorWorldPosition();
-            Vector3 playerViewPosition = m_PlayerView.position;
-            Vector3 lockSource = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
-            Vector3 playerAnchorPosition = m_PlayerRig != null ? m_PlayerRig.transform.position : m_PlayerView.position;
-            Vector3 planarToPlayer = Vector3.ProjectOnPlane(playerAnchorPosition - lockSource, Vector3.up);
-            if (planarToPlayer.magnitude > EffectivePursuitLockDistance)
-                return false;
-
-            if (!HasLineOfSight(sensorPosition, playerViewPosition))
-                return false;
-
-            playerGroundPosition = GetGroundPosition(playerAnchorPosition);
-            return true;
+            return EnemyPerceptionSensor.TryGetPursuitLockPlayerPosition(
+                m_State != EnemyState.Patrol,
+                m_PlayerRig,
+                m_PlayerView,
+                m_Rigidbody,
+                transform,
+                GetSensorWorldPosition(),
+                m_SpawnPosition.y,
+                EffectivePursuitLockDistance,
+                m_ObstacleMask,
+                m_SelfColliders,
+                out playerGroundPosition);
         }
 
         bool TryMaintainOccludedSoftLock()
         {
-            if (m_State == EnemyState.Patrol || m_PlayerView == null || EffectiveOccludedSoftLockDistance <= 0f)
+            if (!EnemyPerceptionSensor.TryGetOccludedSoftLockPlayerPosition(
+                    m_State != EnemyState.Patrol,
+                    m_PlayerRig,
+                    m_PlayerView,
+                    m_Rigidbody,
+                    transform,
+                    m_SpawnPosition.y,
+                    EffectiveOccludedSoftLockDistance,
+                    out Vector3 playerGroundPosition))
+            {
                 return false;
+            }
 
-            Vector3 sensorPosition = GetSensorWorldPosition();
-            Vector3 playerViewPosition = m_PlayerView.position;
-            Vector3 playerAnchorPosition = m_PlayerRig != null ? m_PlayerRig.transform.position : playerViewPosition;
-            Vector3 lockSource = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
-            Vector3 planarToPlayer = Vector3.ProjectOnPlane(playerAnchorPosition - lockSource, Vector3.up);
-            if (planarToPlayer.magnitude > EffectiveOccludedSoftLockDistance)
-                return false;
-
-            Vector3 playerGroundPosition = GetGroundPosition(playerAnchorPosition);
             if (!CanReachMazeTarget(playerGroundPosition))
             {
                 RecordNavigationDebugFailure(
@@ -150,7 +128,7 @@ namespace CIS5680VRGame.Gameplay
                 return true;
             }
 
-            if (HasLineOfSight(sensorPosition, playerViewPosition))
+            if (HasLineOfSight(GetSensorWorldPosition(), m_PlayerView.position))
                 return false;
 
             if (m_State == EnemyState.Chase)
@@ -208,75 +186,29 @@ namespace CIS5680VRGame.Gameplay
 
         bool TryDetectPlayer(out Vector3 playerGroundPosition)
         {
-            playerGroundPosition = transform.position;
-
-            if (m_PlayerView == null)
-                return false;
-
-            if (Time.time < s_GlobalDetectionSuppressedUntil)
-                return false;
-
-            Vector3 sensorPosition = GetSensorWorldPosition();
-            Vector3 playerViewPosition = m_PlayerView.position;
-            Vector3 planarToPlayer = Vector3.ProjectOnPlane(playerViewPosition - sensorPosition, Vector3.up);
-            float planarDistance = planarToPlayer.magnitude;
-            if (planarDistance > EffectiveDetectionRange)
-                return false;
-
-            if (planarDistance <= 0.01f)
-            {
-                playerGroundPosition = GetGroundPosition(playerViewPosition);
-                return true;
-            }
-
-            float angleToPlayer = Vector3.Angle(transform.forward, planarToPlayer.normalized);
-            if (angleToPlayer > EffectiveFieldOfViewDegrees * 0.5f)
-                return false;
-
-            if (!HasLineOfSight(sensorPosition, playerViewPosition))
-                return false;
-
-            playerGroundPosition = GetGroundPosition(m_PlayerRig != null ? m_PlayerRig.transform.position : playerViewPosition);
-            return true;
+            return EnemyPerceptionSensor.TryDetectPlayer(
+                Time.time < s_GlobalDetectionSuppressedUntil,
+                m_PlayerRig,
+                m_PlayerView,
+                transform,
+                GetSensorWorldPosition(),
+                m_SpawnPosition.y,
+                EffectiveDetectionRange,
+                EffectiveFieldOfViewDegrees,
+                m_ObstacleMask,
+                m_SelfColliders,
+                out playerGroundPosition);
         }
 
         bool HasLineOfSight(Vector3 origin, Vector3 destination)
         {
-            Vector3 castDirection = destination - origin;
-            float castDistance = castDirection.magnitude;
-            if (castDistance <= 0.01f)
-                return true;
-
-            RaycastHit[] hits = Physics.RaycastAll(
+            return EnemyPerceptionSensor.HasLineOfSight(
                 origin,
-                castDirection / castDistance,
-                castDistance,
+                destination,
                 m_ObstacleMask,
-                QueryTriggerInteraction.Ignore);
-            if (hits == null || hits.Length == 0)
-                return true;
-
-            System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
-            for (int i = 0; i < hits.Length; i++)
-            {
-                Collider hitCollider = hits[i].collider;
-                if (hitCollider == null || hitCollider.isTrigger)
-                    continue;
-
-                if (IsOwnCollider(hitCollider))
-                    continue;
-
-                Transform hitRoot = hitCollider.transform.root;
-                if (m_PlayerRig != null && hitRoot == m_PlayerRig.transform)
-                    continue;
-
-                if (m_PlayerView != null && hitCollider.transform.IsChildOf(m_PlayerView.root))
-                    continue;
-
-                return false;
-            }
-
-            return true;
+                m_SelfColliders,
+                m_PlayerRig,
+                m_PlayerView);
         }
     }
 }

@@ -60,34 +60,14 @@ namespace CIS5680VRGame.Gameplay
 
         bool HasDirectLocalNavigationPath(Vector3 targetWorldPosition, Transform ignoreRoot)
         {
-            Vector3 origin = GetLocalNavigationProbeWorldPosition();
-            Vector3 target = new(targetWorldPosition.x, origin.y, targetWorldPosition.z);
-            Vector3 planarDirection = target - origin;
-            float distance = planarDirection.magnitude;
-            if (distance <= 0.05f)
-                return true;
-
-            planarDirection /= distance;
-            float probeRadius = GetNavigationClearanceRadius();
-
-            int hitCount = Physics.SphereCastNonAlloc(origin, probeRadius, planarDirection, m_ProbeHits, distance, m_ObstacleMask, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < hitCount; i++)
-            {
-                Collider hitCollider = m_ProbeHits[i].collider;
-                if (hitCollider == null || hitCollider.isTrigger)
-                    continue;
-
-                if (IsOwnCollider(hitCollider))
-                    continue;
-
-                Transform hitRoot = hitCollider.transform.root;
-                if (ignoreRoot != null && hitRoot == ignoreRoot)
-                    continue;
-
-                return false;
-            }
-
-            return true;
+            return EnemyPathPlanner.HasDirectLocalNavigationPath(
+                GetLocalNavigationProbeWorldPosition(),
+                targetWorldPosition,
+                GetNavigationClearanceRadius(),
+                m_ObstacleMask,
+                m_ProbeHits,
+                transform,
+                ignoreRoot);
         }
 
         float GetNavigationClearanceRadius()
@@ -132,26 +112,7 @@ namespace CIS5680VRGame.Gameplay
 
         bool TryAlignChasePathToCurrentCell(Vector2Int currentCell)
         {
-            if (m_GridPath.Count == 0)
-                return false;
-
-            int currentIndex = -1;
-            for (int i = 0; i < m_GridPath.Count; i++)
-            {
-                if (m_GridPath[i] != currentCell)
-                    continue;
-
-                currentIndex = i;
-                break;
-            }
-
-            if (currentIndex < 0)
-                return false;
-
-            if (currentIndex > 0)
-                m_GridPath.RemoveRange(0, currentIndex);
-
-            return true;
+            return EnemyPathPlanner.TryAlignGridPathToCurrentCell(m_GridPath, currentCell);
         }
 
         bool TryUpdateGridSearch(EnemyMovementRequest request)

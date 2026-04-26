@@ -1,10 +1,4 @@
-﻿using System.Collections.Generic;
-using CIS5680VRGame.Generation;
-using Unity.XR.CoreUtils;
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace CIS5680VRGame.Gameplay
 {
@@ -12,40 +6,56 @@ namespace CIS5680VRGame.Gameplay
     {
         void RecordNavigationDebugMode(EnemyNavigationDebugMode mode, Vector3 targetPosition, string decision)
         {
-            if (!m_DebugNavigationObservability)
+            if (!EnemyNavigationDebugReporter.TryRecordMode(
+                    m_DebugNavigationObservability,
+                    ref m_DebugLastNavigationMode,
+                    ref m_DebugLastDecision,
+                    ref m_DebugTargetPosition,
+                    ref m_DebugHasTargetPosition,
+                    mode,
+                    targetPosition,
+                    decision,
+                    out bool changed))
+            {
                 return;
+            }
 
-            bool changed = mode != m_DebugLastNavigationMode || !string.Equals(decision, m_DebugLastDecision, System.StringComparison.Ordinal);
-            m_DebugLastNavigationMode = mode;
-            m_DebugLastDecision = decision;
-            m_DebugTargetPosition = targetPosition;
-            m_DebugHasTargetPosition = true;
             UpdateNavigationDebugSnapshot();
             LogNavigationDebugChange(changed);
         }
 
         void RecordNavigationDebugDecision(string decision, Vector3 targetPosition)
         {
-            if (!m_DebugNavigationObservability)
+            if (!EnemyNavigationDebugReporter.TryRecordDecision(
+                    m_DebugNavigationObservability,
+                    ref m_DebugLastDecision,
+                    ref m_DebugTargetPosition,
+                    ref m_DebugHasTargetPosition,
+                    decision,
+                    targetPosition,
+                    out bool changed))
+            {
                 return;
+            }
 
-            bool changed = !string.Equals(decision, m_DebugLastDecision, System.StringComparison.Ordinal);
-            m_DebugLastDecision = decision;
-            m_DebugTargetPosition = targetPosition;
-            m_DebugHasTargetPosition = true;
             UpdateNavigationDebugSnapshot();
             LogNavigationDebugChange(changed);
         }
 
         void RecordNavigationDebugFailure(string failure, Vector3 targetPosition)
         {
-            if (!m_DebugNavigationObservability)
+            if (!EnemyNavigationDebugReporter.TryRecordFailure(
+                    m_DebugNavigationObservability,
+                    ref m_DebugLastFailure,
+                    ref m_DebugTargetPosition,
+                    ref m_DebugHasTargetPosition,
+                    failure,
+                    targetPosition,
+                    out bool changed))
+            {
                 return;
+            }
 
-            bool changed = !string.Equals(failure, m_DebugLastFailure, System.StringComparison.Ordinal);
-            m_DebugLastFailure = failure;
-            m_DebugTargetPosition = targetPosition;
-            m_DebugHasTargetPosition = true;
             UpdateNavigationDebugSnapshot();
             LogNavigationDebugChange(changed);
         }
@@ -53,44 +63,67 @@ namespace CIS5680VRGame.Gameplay
         void UpdateNavigationDebugSnapshot()
         {
             Vector3 currentPosition = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
-            string currentCell = TryGetDebugCell(currentPosition, out Vector2Int currentGridPosition)
-                ? FormatDebugCell(currentGridPosition)
-                : "Unknown";
-            string targetCell = m_DebugHasTargetPosition && TryGetDebugCell(m_DebugTargetPosition, out Vector2Int targetGridPosition)
-                ? FormatDebugCell(targetGridPosition)
-                : "Unknown";
+            bool hasCurrentCell = TryGetDebugCell(currentPosition, out Vector2Int currentGridPosition);
+            Vector2Int targetGridPosition = default;
+            bool hasTargetCell = m_DebugHasTargetPosition && TryGetDebugCell(m_DebugTargetPosition, out targetGridPosition);
             float stalledFor = Application.isPlaying ? Mathf.Max(0f, Time.time - m_LastProgressAt) : 0f;
 
-            m_DebugStateSummary =
-                $"State={m_State}; Mode={m_DebugLastNavigationMode}; Waiting={m_IsWaitingAtSearchPoint}; " +
-                $"CurrentCell={currentCell}; StalledFor={stalledFor:0.00}s; StuckAttempts={m_StuckRecoveryAttemptCount}";
-            m_DebugPathSummary =
-                $"GraphNodes={m_NavigationNodePath.Count}; GraphWaypoints={m_NavigationWaypointPath.Count}; " +
-                $"GridCells={m_GridPath.Count}; LocalWaypoints={m_LocalNavigationWaypoints.Count}; " +
-                $"GridGoal={FormatDebugCell(m_CurrentPathGoalCell, m_HasCurrentPathGoalCell)}; " +
-                $"GraphGoal={FormatDebugCell(m_CurrentNavigationGoalCell, m_HasCurrentNavigationGoalCell)}; " +
-                $"PatrolGoal={FormatDebugCell(m_CurrentPatrolTargetCell, m_HasCurrentPatrolTargetCell)}; " +
-                $"PathQueries={m_DebugPathQueryCount}; PathCacheHits={m_DebugPathCacheHitCount}; " +
-                $"ReachabilityQueries={m_DebugReachabilityQueryCount}; ReachabilityCacheHits={m_DebugReachabilityCacheHitCount}";
-            m_DebugTargetSummary = m_DebugHasTargetPosition
-                ? $"Target={FormatDebugVector(m_DebugTargetPosition)}; TargetCell={targetCell}; Distance={Vector3.ProjectOnPlane(m_DebugTargetPosition - currentPosition, Vector3.up).magnitude:0.00}m"
-                : "No target";
+            EnemyNavigationDebugReporter.DebugSnapshot snapshot = EnemyNavigationDebugReporter.BuildSnapshot(
+                new EnemyNavigationDebugReporter.SnapshotContext
+                {
+                    State = m_State,
+                    LastMode = m_DebugLastNavigationMode,
+                    IsWaitingAtSearchPoint = m_IsWaitingAtSearchPoint,
+                    CurrentPosition = currentPosition,
+                    HasCurrentCell = hasCurrentCell,
+                    CurrentCell = currentGridPosition,
+                    HasTargetPosition = m_DebugHasTargetPosition,
+                    TargetPosition = m_DebugTargetPosition,
+                    HasTargetCell = hasTargetCell,
+                    TargetCell = targetGridPosition,
+                    StalledFor = stalledFor,
+                    StuckRecoveryAttemptCount = m_StuckRecoveryAttemptCount,
+                    NavigationNodeCount = m_NavigationNodePath.Count,
+                    NavigationWaypointCount = m_NavigationWaypointPath.Count,
+                    GridPathCount = m_GridPath.Count,
+                    LocalWaypointCount = m_LocalNavigationWaypoints.Count,
+                    CurrentPathGoalCell = m_CurrentPathGoalCell,
+                    HasCurrentPathGoalCell = m_HasCurrentPathGoalCell,
+                    CurrentNavigationGoalCell = m_CurrentNavigationGoalCell,
+                    HasCurrentNavigationGoalCell = m_HasCurrentNavigationGoalCell,
+                    CurrentPatrolTargetCell = m_CurrentPatrolTargetCell,
+                    HasCurrentPatrolTargetCell = m_HasCurrentPatrolTargetCell,
+                    PathQueryCount = m_DebugPathQueryCount,
+                    PathCacheHitCount = m_DebugPathCacheHitCount,
+                    ReachabilityQueryCount = m_DebugReachabilityQueryCount,
+                    ReachabilityCacheHitCount = m_DebugReachabilityCacheHitCount,
+                });
+
+            m_DebugStateSummary = snapshot.StateSummary;
+            m_DebugPathSummary = snapshot.PathSummary;
+            m_DebugTargetSummary = snapshot.TargetSummary;
         }
 
         void LogNavigationDebugChange(bool changed)
         {
-            if (!m_DebugLogNavigationDecisions || !changed)
-                return;
-
             float now = Application.isPlaying ? Time.time : Time.realtimeSinceStartup;
-            if (now - m_DebugLastLogAt < Mathf.Max(0.05f, m_DebugLogMinInterval))
+            if (!EnemyNavigationDebugReporter.ShouldLogDecision(
+                    m_DebugLogNavigationDecisions,
+                    changed,
+                    now,
+                    m_DebugLastLogAt,
+                    m_DebugLogMinInterval))
+            {
                 return;
+            }
 
             m_DebugLastLogAt = now;
             Debug.Log(
-                $"Enemy navigation debug: {m_DebugLastDecision}\n" +
-                $"{m_DebugStateSummary}\n{m_DebugPathSummary}\n" +
-                $"LastFailure={m_DebugLastFailure}",
+                EnemyNavigationDebugReporter.BuildLogMessage(
+                    m_DebugLastDecision,
+                    m_DebugStateSummary,
+                    m_DebugPathSummary,
+                    m_DebugLastFailure),
                 this);
         }
 
@@ -102,17 +135,17 @@ namespace CIS5680VRGame.Gameplay
 
         static string FormatDebugCell(Vector2Int cell)
         {
-            return $"({cell.x},{cell.y})";
+            return EnemyNavigationDebugReporter.FormatCell(cell);
         }
 
         static string FormatDebugCell(Vector2Int cell, bool hasCell)
         {
-            return hasCell ? FormatDebugCell(cell) : "None";
+            return EnemyNavigationDebugReporter.FormatCell(cell, hasCell);
         }
 
         static string FormatDebugVector(Vector3 value)
         {
-            return $"({value.x:0.00},{value.y:0.00},{value.z:0.00})";
+            return EnemyNavigationDebugReporter.FormatVector(value);
         }
 
         void DrawNavigationDebugGizmos(Vector3 sensorPosition)
@@ -120,71 +153,34 @@ namespace CIS5680VRGame.Gameplay
             if (!m_DebugNavigationObservability || !m_DebugDrawNavigationGizmos)
                 return;
 
-            DrawDebugWaypointPath(m_NavigationWaypointPath, new Color(0.15f, 0.7f, 1f, 0.85f), 0.08f);
-            DrawDebugWaypointPath(m_LocalNavigationWaypoints, new Color(0.25f, 1f, 0.45f, 0.85f), 0.1f);
-            DrawDebugGridPath();
+            Vector3 debugOrigin = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
+            EnemyNavigationDebugReporter.DrawWaypointPath(
+                m_NavigationWaypointPath,
+                debugOrigin,
+                new Color(0.15f, 0.7f, 1f, 0.85f),
+                0.08f);
+            EnemyNavigationDebugReporter.DrawWaypointPath(
+                m_LocalNavigationWaypoints,
+                debugOrigin,
+                new Color(0.25f, 1f, 0.45f, 0.85f),
+                0.1f);
+            EnemyNavigationDebugReporter.DrawGridPath(m_GridPath, m_GridNavigator, debugOrigin);
 
             if (m_DebugHasTargetPosition)
-            {
-                Gizmos.color = ResolveDebugTargetColor();
-                Vector3 targetPosition = m_DebugTargetPosition + Vector3.up * 0.12f;
-                Gizmos.DrawWireSphere(targetPosition, 0.28f);
-                Gizmos.DrawLine(sensorPosition, targetPosition);
-            }
+                EnemyNavigationDebugReporter.DrawTarget(sensorPosition, m_DebugTargetPosition, m_State);
 
 #if UNITY_EDITOR
             if (m_DebugDrawNavigationLabels)
             {
-                Handles.color = Color.white;
-                Handles.Label(
+                EnemyNavigationDebugReporter.DrawLabel(
                     transform.position + Vector3.up * 2.1f,
-                    $"{name}\n{m_DebugStateSummary}\n{m_DebugPathSummary}\nDecision={m_DebugLastDecision}\nFailure={m_DebugLastFailure}");
+                    name,
+                    m_DebugStateSummary,
+                    m_DebugPathSummary,
+                    m_DebugLastDecision,
+                    m_DebugLastFailure);
             }
 #endif
-        }
-
-        void DrawDebugWaypointPath(IReadOnlyList<Vector3> waypoints, Color color, float nodeRadius)
-        {
-            if (waypoints == null || waypoints.Count == 0)
-                return;
-
-            Gizmos.color = color;
-            Vector3 previous = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
-            previous += Vector3.up * 0.08f;
-            for (int i = 0; i < waypoints.Count; i++)
-            {
-                Vector3 waypoint = waypoints[i] + Vector3.up * 0.08f;
-                Gizmos.DrawLine(previous, waypoint);
-                Gizmos.DrawWireSphere(waypoint, nodeRadius);
-                previous = waypoint;
-            }
-        }
-
-        void DrawDebugGridPath()
-        {
-            if (!CanUseGridNavigation || m_GridPath.Count == 0)
-                return;
-
-            Gizmos.color = new Color(1f, 0.85f, 0.1f, 0.85f);
-            Vector3 previous = m_Rigidbody != null ? m_Rigidbody.position : transform.position;
-            previous += Vector3.up * 0.16f;
-            for (int i = 0; i < m_GridPath.Count; i++)
-            {
-                Vector3 waypoint = m_GridNavigator.GetCellWorldCenter(m_GridPath[i]) + Vector3.up * 0.16f;
-                Gizmos.DrawLine(previous, waypoint);
-                Gizmos.DrawWireCube(waypoint, Vector3.one * 0.18f);
-                previous = waypoint;
-            }
-        }
-
-        Color ResolveDebugTargetColor()
-        {
-            return m_State switch
-            {
-                EnemyState.Chase => new Color(1f, 0.1f, 0.08f, 0.95f),
-                EnemyState.Search => new Color(1f, 0.78f, 0.12f, 0.95f),
-                _ => new Color(0.2f, 0.95f, 0.45f, 0.95f),
-            };
         }
 
         void OnDrawGizmosSelected()

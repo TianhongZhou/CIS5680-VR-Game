@@ -2,10 +2,6 @@
 using CIS5680VRGame.Generation;
 using Unity.XR.CoreUtils;
 using UnityEngine;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
-
 namespace CIS5680VRGame.Gameplay
 {
     [RequireComponent(typeof(Rigidbody))]
@@ -24,14 +20,14 @@ namespace CIS5680VRGame.Gameplay
         const int MaxPulseAttachMeshTrianglesForConvexCollider = 240;
         const float TurnLimitedTranslationScaleThreshold = 0.05f;
 
-        enum EnemyState
+        internal enum EnemyState
         {
             Patrol,
             Chase,
             Search,
         }
 
-        enum EnemyNavigationDebugMode
+        internal enum EnemyNavigationDebugMode
         {
             None,
             NavigationGraphChase,
