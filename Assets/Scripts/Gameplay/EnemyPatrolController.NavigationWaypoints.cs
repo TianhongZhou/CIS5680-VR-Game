@@ -25,9 +25,11 @@ namespace CIS5680VRGame.Gameplay
 
         bool TryRebuildNavigationPath(Vector3 startWorldPosition, Vector3 targetWorldPosition, Vector2Int targetCell, bool hasTargetCell)
         {
+            MazeCellData startCell = null;
+            bool hasStartCell = CanUseGridNavigation && m_GridNavigator.TryGetCellAtWorldPosition(startWorldPosition, out startCell);
+
             if (hasTargetCell
-                && CanUseGridNavigation
-                && m_GridNavigator.TryGetCellAtWorldPosition(startWorldPosition, out MazeCellData startCell))
+                && hasStartCell)
             {
                 if (ShouldSkipFailedNavigationPathRetry(startCell.GridPosition, targetCell, targetWorldPosition))
                     return false;
@@ -42,12 +44,16 @@ namespace CIS5680VRGame.Gameplay
                 }
             }
 
-            m_DebugPathQueryCount++;
+            m_NavigationQueryCache.RecordPathQuery();
             Vector3 currentForward = m_CurrentMoveDirection.sqrMagnitude > 0.0001f ? m_CurrentMoveDirection : transform.forward;
             if (!EnemyPathPlanner.TryBuildNavigationWaypointPath(
                     m_NavigationGraph,
                     startWorldPosition,
                     targetWorldPosition,
+                    hasStartCell ? startCell.GridPosition : default,
+                    hasStartCell,
+                    targetCell,
+                    hasTargetCell,
                     m_SpawnPosition.y,
                     m_Rigidbody != null ? m_Rigidbody.position : transform.position,
                     currentForward,
@@ -58,10 +64,9 @@ namespace CIS5680VRGame.Gameplay
             {
                 if (failure == EnemyPathPlanner.NavigationPathBuildFailure.NoGraphPath
                     && hasTargetCell
-                    && CanUseGridNavigation
-                    && m_GridNavigator.TryGetCellAtWorldPosition(startWorldPosition, out MazeCellData failedStartCell))
+                    && hasStartCell)
                 {
-                    RecordNavigationPathFailure(failedStartCell.GridPosition, targetCell);
+                    RecordNavigationPathFailure(startCell.GridPosition, targetCell);
                 }
 
                 string failureMessage = failure == EnemyPathPlanner.NavigationPathBuildFailure.EmptyAfterTrimming
@@ -73,8 +78,8 @@ namespace CIS5680VRGame.Gameplay
 
             m_CurrentNavigationGoalCell = targetCell;
             m_HasCurrentNavigationGoalCell = hasTargetCell;
-            if (hasTargetCell && CanUseGridNavigation && m_GridNavigator.TryGetCellAtWorldPosition(startWorldPosition, out MazeCellData clearStartCell))
-                ClearNavigationPathFailure(clearStartCell.GridPosition, targetCell);
+            if (hasTargetCell && hasStartCell)
+                ClearNavigationPathFailure(startCell.GridPosition, targetCell);
 
             return true;
         }

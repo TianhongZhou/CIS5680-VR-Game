@@ -93,10 +93,10 @@ namespace CIS5680VRGame.Gameplay
                     HasCurrentNavigationGoalCell = m_HasCurrentNavigationGoalCell,
                     CurrentPatrolTargetCell = m_CurrentPatrolTargetCell,
                     HasCurrentPatrolTargetCell = m_HasCurrentPatrolTargetCell,
-                    PathQueryCount = m_DebugPathQueryCount,
-                    PathCacheHitCount = m_DebugPathCacheHitCount,
-                    ReachabilityQueryCount = m_DebugReachabilityQueryCount,
-                    ReachabilityCacheHitCount = m_DebugReachabilityCacheHitCount,
+                    PathQueryCount = m_NavigationQueryCache.PathQueryCount,
+                    PathCacheHitCount = m_NavigationQueryCache.PathCacheHitCount,
+                    ReachabilityQueryCount = m_NavigationQueryCache.ReachabilityQueryCount,
+                    ReachabilityCacheHitCount = m_NavigationQueryCache.ReachabilityCacheHitCount,
                 });
 
             m_DebugStateSummary = snapshot.StateSummary;

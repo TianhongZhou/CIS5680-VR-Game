@@ -17,6 +17,10 @@ namespace CIS5680VRGame.Gameplay
             MazeNavigationGraph navigationGraph,
             Vector3 startWorldPosition,
             Vector3 targetWorldPosition,
+            Vector2Int startGridPosition,
+            bool hasStartGridPosition,
+            Vector2Int targetGridPosition,
+            bool hasTargetGridPosition,
             float groundY,
             Vector3 currentWorldPosition,
             Vector3 currentForward,
@@ -29,7 +33,22 @@ namespace CIS5680VRGame.Gameplay
             nodePath.Clear();
             waypointPath.Clear();
 
-            if (navigationGraph == null || !navigationGraph.TryFindPath(startWorldPosition, targetWorldPosition, nodePath))
+            if (navigationGraph == null)
+            {
+                failure = NavigationPathBuildFailure.NoGraphPath;
+                return false;
+            }
+
+            bool foundPath = hasStartGridPosition && hasTargetGridPosition
+                ? navigationGraph.TryFindPath(
+                    startGridPosition,
+                    startWorldPosition,
+                    targetGridPosition,
+                    targetWorldPosition,
+                    nodePath)
+                : navigationGraph.TryFindPath(startWorldPosition, targetWorldPosition, nodePath);
+
+            if (!foundPath)
             {
                 failure = NavigationPathBuildFailure.NoGraphPath;
                 return false;

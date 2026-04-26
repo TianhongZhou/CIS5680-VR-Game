@@ -28,7 +28,15 @@ Material:
     - _EdgeSoftness: 0.03
     - _FillAmount: 0.8
     - _InnerRadius: 0.58
+    - _MajorTickInterval: 50
     - _OuterRadius: 0.9
+    - _TickInterval: 10
+    - _TickMajorRadialStart: 0.12
+    - _TickMajorWidth: 0.006
+    - _TickMinorRadialStart: 0.44
+    - _TickMinorWidth: 0.0035
+    - _TickValueMax: 100
     m_Colors:
     - _BackgroundColor: {r: 0.12, g: 0.12, b: 0.12, a: 0.45}
     - _FillColor: {r: 1, g: 0.55, b: 0, a: 0.95}
+    - _TickColor: {r: 0, g: 0, b: 0, a: 0.82}

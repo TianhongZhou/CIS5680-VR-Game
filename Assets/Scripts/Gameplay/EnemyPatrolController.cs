@@ -152,6 +152,7 @@ namespace CIS5680VRGame.Gameplay
         readonly List<Vector3> m_LocalNavigationWaypoints = new(8);
         readonly List<Vector2Int> m_GridReachabilityPath = new(16);
         readonly List<int> m_NavigationReachabilityPath = new(16);
+        readonly EnemyNavigationQueryCache m_NavigationQueryCache = new();
 
         Rigidbody m_Rigidbody;
         Collider[] m_SelfColliders;
@@ -188,25 +189,8 @@ namespace CIS5680VRGame.Gameplay
         int m_StuckRecoveryAttemptCount;
         int m_KnownMazeNavigationTopologyVersion;
         float m_LastTurnLimitedAt = float.NegativeInfinity;
-        Vector2Int m_LastFailedNavigationPathStartCell;
-        Vector2Int m_LastFailedNavigationPathTargetCell;
-        Vector2Int m_LastFailedGridPathStartCell;
-        Vector2Int m_LastFailedGridPathTargetCell;
-        Vector2Int m_CachedReachabilityStartCell;
-        Vector2Int m_CachedReachabilityTargetCell;
-        bool m_HasFailedNavigationPathCache;
-        bool m_HasFailedGridPathCache;
-        bool m_HasReachabilityCache;
-        bool m_CachedReachabilityResult;
         bool m_IsCloseDirectChasing;
         bool m_IsUsingCloseLocalNavigation;
-        float m_LastFailedNavigationPathAt = float.NegativeInfinity;
-        float m_LastFailedGridPathAt = float.NegativeInfinity;
-        float m_LastReachabilityCheckedAt = float.NegativeInfinity;
-        int m_DebugPathQueryCount;
-        int m_DebugPathCacheHitCount;
-        int m_DebugReachabilityQueryCount;
-        int m_DebugReachabilityCacheHitCount;
         Vector3 m_DebugTargetPosition;
         bool m_DebugHasTargetPosition;
         float m_DebugLastLogAt = float.NegativeInfinity;

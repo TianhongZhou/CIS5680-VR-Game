@@ -9,6 +9,8 @@ namespace CIS5680VRGame.UI
         static readonly int s_FillAmountId = Shader.PropertyToID("_FillAmount");
         static readonly int s_FillColorId = Shader.PropertyToID("_FillColor");
         static readonly int s_BackgroundColorId = Shader.PropertyToID("_BackgroundColor");
+        static readonly int s_TickValueMaxId = Shader.PropertyToID("_TickValueMax");
+        const float k_DefaultTickValueMax = 100f;
 
         enum GaugeAnimationMode
         {
@@ -210,6 +212,7 @@ namespace CIS5680VRGame.UI
             m_PropertyBlock.SetFloat(s_FillAmountId, m_DisplayedFillAmount);
             m_PropertyBlock.SetColor(s_FillColorId, fillColor);
             m_PropertyBlock.SetColor(s_BackgroundColorId, backgroundColor);
+            m_PropertyBlock.SetFloat(s_TickValueMaxId, m_PlayerHealth != null ? m_PlayerHealth.MaxHealth : k_DefaultTickValueMax);
             m_Renderer.SetPropertyBlock(m_PropertyBlock);
         }
 

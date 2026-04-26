@@ -28,7 +28,7 @@ namespace CIS5680VRGame.Gameplay
             if (CanUseNavigationGraph)
             {
                 usedMazeNavigation = true;
-                m_DebugReachabilityQueryCount++;
+                m_NavigationQueryCache.RecordReachabilityQuery();
                 if (m_NavigationGraph.TryFindPath(startWorldPosition, targetWorldPosition, m_NavigationReachabilityPath))
                     return true;
             }
@@ -36,7 +36,7 @@ namespace CIS5680VRGame.Gameplay
             if (CanUseGridNavigation)
             {
                 usedMazeNavigation = true;
-                m_DebugReachabilityQueryCount++;
+                m_NavigationQueryCache.RecordReachabilityQuery();
                 if (m_GridNavigator.TryFindPath(startWorldPosition, targetWorldPosition, m_GridReachabilityPath))
                     return true;
             }
@@ -49,7 +49,7 @@ namespace CIS5680VRGame.Gameplay
             if (TryGetCachedGridReachabilityResult(startCell, targetCell, out bool reachable))
                 return reachable;
 
-            m_DebugReachabilityQueryCount++;
+            m_NavigationQueryCache.RecordReachabilityQuery();
             bool result = m_GridNavigator.TryFindPath(startCell, targetCell, m_GridReachabilityPath);
             CacheGridReachabilityResult(startCell, targetCell, result);
             return result;
@@ -57,56 +57,32 @@ namespace CIS5680VRGame.Gameplay
 
         bool TryUseCachedGridReachabilityPath(Vector2Int startCell, Vector2Int targetCell, List<Vector2Int> pathBuffer)
         {
-            if (!IsRecent(m_LastReachabilityCheckedAt, m_ReachabilityCacheDuration)
-                || !m_HasReachabilityCache
-                || !m_CachedReachabilityResult
-                || m_CachedReachabilityStartCell != startCell
-                || m_CachedReachabilityTargetCell != targetCell
-                || m_GridReachabilityPath.Count == 0)
-            {
-                return false;
-            }
-
-            m_DebugPathCacheHitCount++;
-            pathBuffer.Clear();
-            pathBuffer.AddRange(m_GridReachabilityPath);
-            return true;
+            return m_NavigationQueryCache.TryUseCachedGridReachabilityPath(
+                startCell,
+                targetCell,
+                m_ReachabilityCacheDuration,
+                m_GridReachabilityPath,
+                pathBuffer);
         }
 
         bool TryGetCachedGridReachabilityResult(Vector2Int startCell, Vector2Int targetCell, out bool reachable)
         {
-            reachable = false;
-            if (!IsRecent(m_LastReachabilityCheckedAt, m_ReachabilityCacheDuration)
-                || !m_HasReachabilityCache
-                || m_CachedReachabilityStartCell != startCell
-                || m_CachedReachabilityTargetCell != targetCell)
-            {
-                return false;
-            }
-
-            m_DebugReachabilityCacheHitCount++;
-            reachable = m_CachedReachabilityResult;
-            return true;
+            return m_NavigationQueryCache.TryGetCachedGridReachabilityResult(
+                startCell,
+                targetCell,
+                m_ReachabilityCacheDuration,
+                out reachable);
         }
 
         void CacheGridReachabilityResult(Vector2Int startCell, Vector2Int targetCell, bool reachable)
         {
-            m_CachedReachabilityStartCell = startCell;
-            m_CachedReachabilityTargetCell = targetCell;
-            m_CachedReachabilityResult = reachable;
-            m_HasReachabilityCache = true;
-            m_LastReachabilityCheckedAt = Time.time;
+            m_NavigationQueryCache.CacheGridReachabilityResult(startCell, targetCell, reachable);
         }
 
         bool ShouldSkipFailedNavigationPathRetry(Vector2Int startCell, Vector2Int targetCell, Vector3 targetWorldPosition)
         {
-            if (!m_HasFailedNavigationPathCache
-                || m_LastFailedNavigationPathStartCell != startCell
-                || m_LastFailedNavigationPathTargetCell != targetCell
-                || !IsRecent(m_LastFailedNavigationPathAt, m_PathFailureRetryDelay))
-            {
+            if (!m_NavigationQueryCache.ShouldSkipFailedNavigationPathRetry(startCell, targetCell, m_PathFailureRetryDelay))
                 return false;
-            }
 
             RecordNavigationDebugDecision($"Navigation graph retry skipped for recent failed path {FormatDebugCell(startCell)} -> {FormatDebugCell(targetCell)}.", targetWorldPosition);
             return true;
@@ -114,13 +90,8 @@ namespace CIS5680VRGame.Gameplay
 
         bool ShouldSkipFailedGridPathRetry(Vector2Int startCell, Vector2Int targetCell, Vector3 targetWorldPosition)
         {
-            if (!m_HasFailedGridPathCache
-                || m_LastFailedGridPathStartCell != startCell
-                || m_LastFailedGridPathTargetCell != targetCell
-                || !IsRecent(m_LastFailedGridPathAt, m_PathFailureRetryDelay))
-            {
+            if (!m_NavigationQueryCache.ShouldSkipFailedGridPathRetry(startCell, targetCell, m_PathFailureRetryDelay))
                 return false;
-            }
 
             RecordNavigationDebugDecision($"Grid path retry skipped for recent failed path {FormatDebugCell(startCell)} -> {FormatDebugCell(targetCell)}.", targetWorldPosition);
             return true;
@@ -128,52 +99,27 @@ namespace CIS5680VRGame.Gameplay
 
         void RecordNavigationPathFailure(Vector2Int startCell, Vector2Int targetCell)
         {
-            m_LastFailedNavigationPathStartCell = startCell;
-            m_LastFailedNavigationPathTargetCell = targetCell;
-            m_HasFailedNavigationPathCache = true;
-            m_LastFailedNavigationPathAt = Time.time;
+            m_NavigationQueryCache.RecordNavigationPathFailure(startCell, targetCell);
         }
 
         void RecordGridPathFailure(Vector2Int startCell, Vector2Int targetCell)
         {
-            m_LastFailedGridPathStartCell = startCell;
-            m_LastFailedGridPathTargetCell = targetCell;
-            m_HasFailedGridPathCache = true;
-            m_LastFailedGridPathAt = Time.time;
+            m_NavigationQueryCache.RecordGridPathFailure(startCell, targetCell);
         }
 
         void ClearNavigationPathFailure(Vector2Int startCell, Vector2Int targetCell)
         {
-            if (m_HasFailedNavigationPathCache
-                && m_LastFailedNavigationPathStartCell == startCell
-                && m_LastFailedNavigationPathTargetCell == targetCell)
-            {
-                m_HasFailedNavigationPathCache = false;
-            }
+            m_NavigationQueryCache.ClearNavigationPathFailure(startCell, targetCell);
         }
 
         void ClearGridPathFailure(Vector2Int startCell, Vector2Int targetCell)
         {
-            if (m_HasFailedGridPathCache
-                && m_LastFailedGridPathStartCell == startCell
-                && m_LastFailedGridPathTargetCell == targetCell)
-            {
-                m_HasFailedGridPathCache = false;
-            }
+            m_NavigationQueryCache.ClearGridPathFailure(startCell, targetCell);
         }
 
         void ClearNavigationQueryCaches()
         {
-            m_HasFailedNavigationPathCache = false;
-            m_HasFailedGridPathCache = false;
-            m_HasReachabilityCache = false;
-            m_GridReachabilityPath.Clear();
-            m_NavigationReachabilityPath.Clear();
-        }
-
-        static bool IsRecent(float lastTime, float duration)
-        {
-            return duration > 0f && Time.time - lastTime <= duration;
+            m_NavigationQueryCache.Clear(m_GridReachabilityPath, m_NavigationReachabilityPath);
         }
 
         void BeginBlockedMazeSearchAtCurrentPosition()

@@ -11,6 +11,8 @@ namespace CIS5680VRGame.UI
         static readonly int s_FillAmountId = Shader.PropertyToID("_FillAmount");
         static readonly int s_FillColorId = Shader.PropertyToID("_FillColor");
         static readonly int s_BackgroundColorId = Shader.PropertyToID("_BackgroundColor");
+        static readonly int s_TickValueMaxId = Shader.PropertyToID("_TickValueMax");
+        const float k_DefaultTickValueMax = 100f;
         static readonly List<InputDevice> s_LeftControllerDevices = new();
         static readonly List<InputDevice> s_RightControllerDevices = new();
 
@@ -251,6 +253,7 @@ namespace CIS5680VRGame.UI
             m_PropertyBlock.SetFloat(s_FillAmountId, m_DisplayedFillAmount);
             m_PropertyBlock.SetColor(s_FillColorId, fillColor);
             m_PropertyBlock.SetColor(s_BackgroundColorId, backgroundColor);
+            m_PropertyBlock.SetFloat(s_TickValueMaxId, m_PlayerEnergy != null ? m_PlayerEnergy.MaxEnergy : k_DefaultTickValueMax);
             m_Renderer.SetPropertyBlock(m_PropertyBlock);
         }
 

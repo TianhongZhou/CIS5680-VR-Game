@@ -310,6 +310,24 @@ namespace CIS5680VRGame.Generation
             return TryFindPath(startNode.Id, targetNode.Id, pathBuffer);
         }
 
+        public bool TryFindPath(
+            Vector2Int startGridPosition,
+            Vector3 startWorldPosition,
+            Vector2Int targetGridPosition,
+            Vector3 targetWorldPosition,
+            List<int> pathBuffer,
+            int navigationLayer = int.MinValue)
+        {
+            if (!TryGetNearestNodeInModule(startGridPosition, startWorldPosition, out MazeNavigationNode startNode, navigationLayer)
+                || !TryGetNearestNodeInModule(targetGridPosition, targetWorldPosition, out MazeNavigationNode targetNode, navigationLayer))
+            {
+                pathBuffer?.Clear();
+                return false;
+            }
+
+            return TryFindPath(startNode.Id, targetNode.Id, pathBuffer);
+        }
+
         public void GetPathWorldPositions(IList<int> nodePath, List<Vector3> worldPositions)
         {
             if (worldPositions == null)
@@ -331,6 +349,39 @@ namespace CIS5680VRGame.Generation
         public bool TryGetModule(Vector2Int gridPosition, out MazeNavigationModuleRecord module)
         {
             return m_ModulesByGridPosition.TryGetValue(gridPosition, out module);
+        }
+
+        bool TryGetNearestNodeInModule(
+            Vector2Int gridPosition,
+            Vector3 worldPosition,
+            out MazeNavigationNode node,
+            int navigationLayer = int.MinValue)
+        {
+            node = null;
+            if (!m_ModulesByGridPosition.TryGetValue(gridPosition, out MazeNavigationModuleRecord module))
+                return false;
+
+            float bestDistanceSqr = float.PositiveInfinity;
+            Vector3 planarPosition = new(worldPosition.x, 0f, worldPosition.z);
+            IReadOnlyList<int> nodeIds = module.NodeIds;
+            for (int i = 0; i < nodeIds.Count; i++)
+            {
+                if (!m_NodesById.TryGetValue(nodeIds[i], out MazeNavigationNode candidate))
+                    continue;
+
+                if (navigationLayer != int.MinValue && candidate.NavigationLayer != navigationLayer)
+                    continue;
+
+                Vector3 planarCandidate = new(candidate.WorldPosition.x, 0f, candidate.WorldPosition.z);
+                float distanceSqr = (planarCandidate - planarPosition).sqrMagnitude;
+                if (distanceSqr >= bestDistanceSqr)
+                    continue;
+
+                bestDistanceSqr = distanceSqr;
+                node = candidate;
+            }
+
+            return node != null;
         }
 
         public bool TryGetNearestModule(Vector3 worldPosition, out MazeNavigationModuleRecord module, int navigationLayer = int.MinValue)

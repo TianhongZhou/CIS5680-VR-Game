@@ -96,7 +96,7 @@ namespace CIS5680VRGame.Gameplay
                 return true;
             }
 
-            m_DebugPathQueryCount++;
+            m_NavigationQueryCache.RecordPathQuery();
             if (!m_GridNavigator.TryFindPath(currentCell, targetCell, m_GridPath))
             {
                 RecordNavigationDebugFailure($"Grid path rebuild failed: {FormatDebugCell(currentCell)} -> {FormatDebugCell(targetCell)}.", targetWorldPosition);
