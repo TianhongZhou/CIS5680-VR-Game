@@ -16,6 +16,9 @@ namespace CIS5680VRGame.Balls
         [SerializeField] GameObject m_ThrowableBallPrefab;
         [SerializeField] Transform m_SpawnPoint;
         [SerializeField] TMP_Text m_HoverInfoText;
+        [SerializeField] bool m_AutoSizeHoverInfoText = true;
+        [SerializeField, Min(1f)] float m_HoverInfoFontSizeMax = 23f;
+        [SerializeField, Min(1f)] float m_HoverInfoFontSizeMin = 15f;
         [SerializeField] bool m_SpawnOnStart = true;
         [SerializeField] GameObject[] m_HideWhenEmpty;
 
@@ -52,10 +55,18 @@ namespace CIS5680VRGame.Balls
             m_ResolvedEnergyCost = ResolveEnergyCost();
             m_HasResolvedEnergyCost = true;
 
+            ConfigureHoverInfoText();
             if (m_HoverInfoText != null)
                 m_HoverInfoText.enabled = false;
 
             RefreshVisualState();
+        }
+
+        void OnValidate()
+        {
+            m_HoverInfoFontSizeMax = Mathf.Max(1f, m_HoverInfoFontSizeMax);
+            m_HoverInfoFontSizeMin = Mathf.Clamp(m_HoverInfoFontSizeMin, 1f, m_HoverInfoFontSizeMax);
+            ConfigureHoverInfoText();
         }
 
         void OnEnable()
@@ -93,7 +104,7 @@ namespace CIS5680VRGame.Balls
         {
             if (UsesEnergy)
             {
-                string costText = EnergyCost <= 0 ? "FREE" : $"{EnergyCost} EN";
+                string costText = EnergyCost <= 0 ? "FREE" : $"{EnergyCost} Energy";
                 return $"{m_DisplayName}\nCost: {costText}";
             }
 
@@ -232,7 +243,10 @@ namespace CIS5680VRGame.Balls
             {
                 hoverInfo.SetProvider(this);
                 if (m_HoverInfoText != null)
+                {
+                    ConfigureHoverInfoText();
                     hoverInfo.SetTextTarget(m_HoverInfoText);
+                }
             }
 
             if (!spawned.TryGetComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>(out var grabInteractable))
@@ -340,6 +354,20 @@ namespace CIS5680VRGame.Balls
                 if (m_HideWhenEmpty[i] != null)
                     m_HideWhenEmpty[i].SetActive(show);
             }
+        }
+
+        void ConfigureHoverInfoText()
+        {
+            if (m_HoverInfoText == null || !m_AutoSizeHoverInfoText)
+                return;
+
+            float maxFontSize = Mathf.Max(1f, m_HoverInfoFontSizeMax);
+            float minFontSize = Mathf.Clamp(m_HoverInfoFontSizeMin, 1f, maxFontSize);
+            m_HoverInfoText.enableAutoSizing = true;
+            m_HoverInfoText.fontSizeMax = maxFontSize;
+            m_HoverInfoText.fontSizeMin = minFontSize;
+            if (m_HoverInfoText.fontSize > maxFontSize)
+                m_HoverInfoText.fontSize = maxFontSize;
         }
 
         int ResolveEnergyCost()

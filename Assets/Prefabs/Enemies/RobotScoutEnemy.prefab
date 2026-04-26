@@ -123,6 +123,19 @@ MonoBehaviour:
   m_PathNodeArrivalDistance: 0.4
   m_StuckProgressDistance: 0.08
   m_StuckRecoveryDelay: 1.4
+  m_StuckSoftRecoveryAttempts: 2
+  m_StuckTurnInPlaceGraceDuration: 0.35
+  m_DebugNavigationObservability: 1
+  m_DebugDrawNavigationGizmos: 1
+  m_DebugDrawNavigationLabels: 1
+  m_DebugLogNavigationDecisions: 1
+  m_DebugLogMinInterval: 0.2
+  m_DebugLastNavigationMode: 0
+  m_DebugLastDecision: None
+  m_DebugLastFailure: None
+  m_DebugStateSummary: Not running
+  m_DebugPathSummary: No path data
+  m_DebugTargetSummary: No target
 --- !u!1 &589999925825230329
 GameObject:
   m_ObjectHideFlags: 0
@@ -732,8 +745,8 @@ SphereCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.89419246
-  m_Center: {x: -0.23970374, y: 0.9358132, z: -0.06553}
+  m_Radius: 1.1209885
+  m_Center: {x: -0.23970377, y: 0.9358129, z: 0.16126525}
 --- !u!114 &9222345678901234570
 MonoBehaviour:
   m_ObjectHideFlags: 0

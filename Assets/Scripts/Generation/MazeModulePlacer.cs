@@ -129,8 +129,8 @@ namespace CIS5680VRGame.Generation
         [SerializeField, Min(0.1f)] float m_RoleMarkerHeight = 1.1f;
         [SerializeField, Min(0.1f)] float m_RoleMarkerDiameter = 0.5f;
 
-        Vector3 m_LastResolvedOrigin;
-        bool m_HasResolvedOrigin;
+        [SerializeField, HideInInspector] Vector3 m_LastResolvedOrigin;
+        [SerializeField, HideInInspector] bool m_HasResolvedOrigin;
         Material m_RuntimeHiddenDoorInteractionPointMaterial;
         Material m_RuntimeGuidePipelineBaseMaterial;
         Material m_RuntimeGuidePipelineGlowMaterial;
@@ -143,6 +143,12 @@ namespace CIS5680VRGame.Generation
         public bool TryGetPlacedModuleNavigationData(Vector2Int gridPosition, out MazePlacedModuleNavigationData data)
         {
             return m_PlacedNavigationModules.TryGetValue(gridPosition, out data);
+        }
+
+        public void EnsurePlacementOriginCached()
+        {
+            if (!m_HasResolvedOrigin)
+                CachePlacementOrigin();
         }
 
         public void BuildModules(MazeLayout layout, MazeRunBootstrap bootstrap)

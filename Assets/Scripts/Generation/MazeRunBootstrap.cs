@@ -134,6 +134,9 @@ namespace CIS5680VRGame.Generation
         [System.NonSerialized] string m_LastBatchSeedTestSummary = "No batch seed smoke test has been run yet.";
         [System.NonSerialized] string m_LastParameterExportPath = "No parameter export has been created yet.";
         [System.NonSerialized] string m_LastRuntimeProfileSummary = "No runtime random maze profile override applied.";
+        [SerializeField, HideInInspector] bool m_HasLastGeneratedRuntimeSeed;
+        [SerializeField, HideInInspector] int m_LastGeneratedRuntimeSeed;
+        [SerializeField, HideInInspector] MazeMainPathBuildMode m_LastGeneratedRuntimeBuildMode = MazeMainPathBuildMode.Normal;
         readonly HashSet<MazeConnectionKey> m_OpenHiddenDoorConnections = new();
 
         public event System.Action HiddenDoorNavigationStateChanged;
@@ -299,6 +302,7 @@ namespace CIS5680VRGame.Generation
                 return;
             }
 
+            RememberGeneratedRuntimeLayout(buildMode);
             ClearHiddenDoorNavigationState(notifyChanged: false);
 
             if (m_ModulePlacer != null)
@@ -319,11 +323,78 @@ namespace CIS5680VRGame.Generation
             }
         }
 
+        public bool EnsureRuntimeNavigationData()
+        {
+            if (!Application.isPlaying)
+                return CurrentLayout != null && (m_NavigationGraph == null || m_NavigationGraph.HasGraph);
+
+            ResolveGenerator();
+            ResolveModulePlacer();
+            EnsureGridNavigator();
+            EnsureNavigationGraph();
+            EnsureLocalNavigationProvider();
+
+            bool restoredLayout = false;
+            bool restoredGraph = false;
+            if (CurrentLayout == null)
+            {
+                if (m_Generator == null)
+                    return false;
+
+                ApplyConfiguredGeneratorSettings();
+                if (m_HasLastGeneratedRuntimeSeed)
+                    CurrentSeed = m_LastGeneratedRuntimeSeed;
+                else
+                    CurrentSeed = ResolveSeed();
+
+                MazeMainPathBuildMode buildMode = m_HasLastGeneratedRuntimeSeed
+                    ? m_LastGeneratedRuntimeBuildMode
+                    : LastGeneratedMainPathBuildMode;
+                CurrentLayout = m_Generator.GenerateLayout(CurrentSeed, buildMode);
+                if (CurrentLayout == null)
+                {
+                    if (m_NavigationGraph != null)
+                        m_NavigationGraph.Clear();
+                    Debug.LogError($"MazeRunBootstrap could not restore runtime maze layout using seed {CurrentSeed}.", this);
+                    return false;
+                }
+
+                RememberGeneratedRuntimeLayout(buildMode);
+                restoredLayout = true;
+            }
+
+            if (m_ModulePlacer != null)
+                m_ModulePlacer.EnsurePlacementOriginCached();
+
+            if (CurrentLayout != null && m_NavigationGraph != null && !m_NavigationGraph.HasGraph)
+            {
+                m_NavigationGraph.BuildFromLayout(CurrentLayout);
+                restoredGraph = m_NavigationGraph.HasGraph;
+            }
+
+            if ((restoredLayout || restoredGraph) && m_LogBootstrap)
+            {
+                Debug.LogWarning(
+                    $"MazeRunBootstrap restored runtime navigation data. " +
+                    $"LayoutRestored={restoredLayout}, GraphRestored={restoredGraph}, Seed={CurrentSeed}, Mode={m_LastGeneratedRuntimeBuildMode}.",
+                    this);
+            }
+
+            return CurrentLayout != null && (m_NavigationGraph == null || m_NavigationGraph.HasGraph);
+        }
+
         public void SetFixedSeed(int seed)
         {
             m_UseFixedSeed = true;
             m_FixedSeed = seed;
             CurrentSeed = seed;
+        }
+
+        void RememberGeneratedRuntimeLayout(MazeMainPathBuildMode buildMode)
+        {
+            m_LastGeneratedRuntimeSeed = CurrentSeed;
+            m_HasLastGeneratedRuntimeSeed = true;
+            m_LastGeneratedRuntimeBuildMode = buildMode;
         }
 
         public int RandomizeFixedSeed()
