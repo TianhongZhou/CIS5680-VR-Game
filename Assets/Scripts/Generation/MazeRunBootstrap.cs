@@ -98,7 +98,10 @@ namespace CIS5680VRGame.Generation
 
         [Header("Terrain Variants")]
         [SerializeField, Min(0)] int m_BeveledCornerCellCount = 6;
-        [SerializeField, Min(0)] int m_FloorRidgeCellCount = 8;
+        [SerializeField, Min(0)]
+        [InspectorName("Guide Pipeline Cell Count")]
+        [Tooltip("Controls how many generated maze cells should carry the floor guide-pipeline light path. Serialized name is kept for older scenes and exported profiles.")]
+        int m_FloorRidgeCellCount = 8;
 
         [Header("Enemy Prototype")]
         [SerializeField, Min(0)] int m_PrototypeEnemyCount = 1;
@@ -114,6 +117,12 @@ namespace CIS5680VRGame.Generation
         [SerializeField] int m_MinGoalDistanceFromStart = 7;
         [SerializeField] int m_BranchFreeStartCells = 3;
         [SerializeField] int m_PreferredStraightStartCells = 3;
+        [SerializeField, Min(0)]
+        [Tooltip("Maximum consecutive main-path cells without a side branch. When exceeded, generation tries to add extra branches up to Max Branch Count. Set 0 to disable.")]
+        int m_MaxBranchlessMainPathCells = 6;
+        [SerializeField, Range(0f, 0.75f)]
+        [Tooltip("Earliest main-path ratio where branches may start anchoring. Lower values make large mazes branch sooner after the start.")]
+        float m_FirstBranchAnchorRatio = 0.2f;
         [SerializeField] float m_StartZoneRatio = 0.25f;
         [SerializeField] float m_MidZoneRatio = 0.35f;
 
@@ -182,6 +191,8 @@ namespace CIS5680VRGame.Generation
         public int MinGoalDistanceFromStart => m_MinGoalDistanceFromStart;
         public int BranchFreeStartCells => m_BranchFreeStartCells;
         public int PreferredStraightStartCells => m_PreferredStraightStartCells;
+        public int MaxBranchlessMainPathCells => m_MaxBranchlessMainPathCells;
+        public float FirstBranchAnchorRatio => m_FirstBranchAnchorRatio;
         public float StartZoneRatio => m_StartZoneRatio;
         public float MidZoneRatio => m_MidZoneRatio;
         public int BatchTestStartSeed => m_BatchTestStartSeed;
@@ -574,6 +585,8 @@ namespace CIS5680VRGame.Generation
                 m_MinGoalDistanceFromStart = Mathf.Max(4, profile.skeletonRules.minGoalDistanceFromStart);
                 m_BranchFreeStartCells = Mathf.Max(0, profile.skeletonRules.branchFreeStartCells);
                 m_PreferredStraightStartCells = Mathf.Max(0, profile.skeletonRules.preferredStraightStartCells);
+                m_MaxBranchlessMainPathCells = Mathf.Max(0, profile.skeletonRules.maxBranchlessMainPathCells);
+                m_FirstBranchAnchorRatio = Mathf.Clamp01(profile.skeletonRules.firstBranchAnchorRatio);
                 m_StartZoneRatio = Mathf.Clamp01(profile.skeletonRules.startZoneRatio);
                 m_MidZoneRatio = Mathf.Clamp01(profile.skeletonRules.midZoneRatio);
             }
@@ -617,6 +630,8 @@ namespace CIS5680VRGame.Generation
                     m_MinGoalDistanceFromStart,
                     m_BranchFreeStartCells,
                     m_PreferredStraightStartCells,
+                    m_MaxBranchlessMainPathCells,
+                    m_FirstBranchAnchorRatio,
                     m_StartZoneRatio,
                     m_MidZoneRatio);
             }
@@ -660,6 +675,8 @@ namespace CIS5680VRGame.Generation
             ValidateMinimum(errors, "Min Goal Distance From Start", m_MinGoalDistanceFromStart, 4);
             ValidateNonNegative(errors, "Branch-Free Start Cells", m_BranchFreeStartCells);
             ValidateNonNegative(errors, "Preferred Straight Start Cells", m_PreferredStraightStartCells);
+            ValidateNonNegative(errors, "Max Branchless Main Path Cells", m_MaxBranchlessMainPathCells);
+            ValidateRatio(errors, "First Branch Anchor Ratio", m_FirstBranchAnchorRatio);
             ValidateRatio(errors, "Start Zone Ratio", m_StartZoneRatio);
             ValidateRatio(errors, "Mid Zone Ratio", m_MidZoneRatio);
 
@@ -817,6 +834,8 @@ namespace CIS5680VRGame.Generation
                     minGoalDistanceFromStart = m_MinGoalDistanceFromStart,
                     branchFreeStartCells = m_BranchFreeStartCells,
                     preferredStraightStartCells = m_PreferredStraightStartCells,
+                    maxBranchlessMainPathCells = m_MaxBranchlessMainPathCells,
+                    firstBranchAnchorRatio = m_FirstBranchAnchorRatio,
                     startZoneRatio = m_StartZoneRatio,
                     midZoneRatio = m_MidZoneRatio,
                 },
@@ -1255,6 +1274,8 @@ namespace CIS5680VRGame.Generation
             public int minGoalDistanceFromStart;
             public int branchFreeStartCells;
             public int preferredStraightStartCells;
+            public int maxBranchlessMainPathCells;
+            public float firstBranchAnchorRatio;
             public float startZoneRatio;
             public float midZoneRatio;
         }
@@ -1313,7 +1334,7 @@ namespace CIS5680VRGame.Generation
             int effectiveMaximumPathLength = Mathf.Max(sizeProfile.MaxMainPathLength, effectiveMinimumPathLength);
             int earliestBranchAnchorIndex = Mathf.Max(
                 Mathf.Clamp(bootstrap.BranchFreeStartCells, 1, Mathf.Max(1, effectiveMaximumPathLength - 2)),
-                Mathf.CeilToInt((effectiveMaximumPathLength - 1) * 0.5f));
+                Mathf.CeilToInt((effectiveMaximumPathLength - 1) * bootstrap.FirstBranchAnchorRatio));
             int interiorCellCount = Mathf.Max(0, effectiveMaximumPathLength - 2);
             int startZoneInteriorCells = Mathf.Clamp(Mathf.FloorToInt(interiorCellCount * bootstrap.StartZoneRatio), 0, interiorCellCount);
             int remainingInteriorAfterStart = Mathf.Max(0, interiorCellCount - startZoneInteriorCells);
@@ -1364,6 +1385,8 @@ namespace CIS5680VRGame.Generation
             EditorGUILayout.LabelField("Guide Pipeline Cells", bootstrap.FloorRidgeCellCount.ToString());
             EditorGUILayout.LabelField("Branch-Free Start Cells", bootstrap.BranchFreeStartCells.ToString());
             EditorGUILayout.LabelField("Preferred Straight Start Cells", bootstrap.PreferredStraightStartCells.ToString());
+            EditorGUILayout.LabelField("Max Branchless Main Path Cells", bootstrap.MaxBranchlessMainPathCells == 0 ? "Disabled" : bootstrap.MaxBranchlessMainPathCells.ToString());
+            EditorGUILayout.LabelField("First Branch Anchor", $"{bootstrap.FirstBranchAnchorRatio:P0} of main path");
             EditorGUILayout.LabelField("Path Zones", $"Start {startZoneInteriorCells + 1} / Mid {midZoneInteriorCells} / Late {lateZoneInteriorCells + 1}");
             EditorGUILayout.LabelField("Earliest Branch Anchor", $"Step {earliestBranchAnchorIndex}+");
 

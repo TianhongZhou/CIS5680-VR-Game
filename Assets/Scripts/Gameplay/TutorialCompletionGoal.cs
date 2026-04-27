@@ -65,6 +65,7 @@ namespace CIS5680VRGame.Gameplay
                 m_TutorialLevelController = FindObjectOfType<TutorialLevelController>();
 
             m_TutorialLevelController?.NotifyTutorialGoalReached();
+            ProfileService.MarkTutorialCompletedForShopTutorial(m_ShopTutorialGoldGrant);
             ApplyCompletedVisualState();
             PulseAudioService.PlayLevelComplete(0.94f);
             ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);

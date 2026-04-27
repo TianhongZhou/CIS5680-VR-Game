@@ -89,6 +89,7 @@ MonoBehaviour:
   m_ExternalPushDrag: 10
   m_ExternalPushAngularDrag: 10
   m_ClosePursuitDistance: 4.75
+  m_ClosePursuitDistanceHysteresis: 0.5
   m_ClosePursuitModuleDistance: 1
   m_RotationSpeed: 14
   m_DirectionSmoothing: 14
@@ -121,10 +122,13 @@ MonoBehaviour:
   m_EyeVerticalLead: 0.12
   m_CorridorCenteringSpeed: 3.1
   m_PathNodeArrivalDistance: 0.4
+  m_SearchArrivalDistance: 0.6
   m_StuckProgressDistance: 0.08
   m_StuckRecoveryDelay: 1.4
   m_StuckSoftRecoveryAttempts: 2
   m_StuckTurnInPlaceGraceDuration: 0.35
+  m_PathFailureRetryDelay: 0.35
+  m_ReachabilityCacheDuration: 0.2
   m_DebugNavigationObservability: 1
   m_DebugDrawNavigationGizmos: 1
   m_DebugDrawNavigationLabels: 1

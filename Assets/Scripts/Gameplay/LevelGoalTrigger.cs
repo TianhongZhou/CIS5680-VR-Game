@@ -1,3 +1,4 @@
+using System.Collections;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -22,12 +23,14 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] Renderer[] m_TargetRenderers;
         [SerializeField] GameObject[] m_EnableOnComplete;
+        [SerializeField] bool m_ApplyCompletedVisualState = true;
         [SerializeField] Color m_CompletedColor = new(0.22f, 1f, 0.72f, 1f);
         [SerializeField] Color m_CompletedEmissionColor = new(0.08f, 0.9f, 0.55f, 1f);
         [SerializeField] bool m_LogCompletion = true;
         [SerializeField] Vector3 m_MenuLocalOffset = new(0f, -0.36f, 2f);
         [SerializeField] Vector2 m_MenuSize = new(900f, 540f);
         [SerializeField] Vector2 m_ButtonSize = new(240f, 84f);
+        [SerializeField] Color m_MenuBackdropColor = new(0f, 0f, 0f, 0.42f);
         [SerializeField] string m_MainMenuSceneName = "MainMenu";
         [Header("Next Level")]
         [SerializeField] bool m_EnableNextLevelButton = true;
@@ -49,6 +52,21 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] bool m_ShowGoldSettlementOnCompletion = true;
         [SerializeField] Color m_GoldSettlementPrimaryColor = new(0.98f, 0.84f, 0.32f, 1f);
         [SerializeField] Color m_GoldSettlementSecondaryColor = new(0.9f, 0.95f, 1f, 1f);
+        [Header("Exit Transition")]
+        [SerializeField] bool m_UseExitTransition;
+        [SerializeField] MazeExitGateVisualController m_ExitVisualController;
+        [SerializeField, Range(0f, 1f)] float m_ExitViewEffectIntensity = 0.86f;
+        [SerializeField, Range(0f, 1f)] float m_ExitViewEffectPeakOpacity = 0.98f;
+        [SerializeField, Min(0.01f)] float m_ExitViewFadeOutDuration = 0.42f;
+        [SerializeField, Min(0f)] float m_ExitViewHoldDuration = 0.18f;
+        [SerializeField, Min(0.01f)] float m_ExitViewFadeInDuration = 0.28f;
+        [SerializeField] Color m_ExitViewTint = new(0.01f, 0.018f, 0.07f, 1f);
+        [SerializeField] Color m_ExitViewCoreColor = new(0.72f, 0.92f, 1f, 1f);
+        [SerializeField] bool m_ExitHoldBlackBehindMenu;
+        [SerializeField] Color m_ExitMenuBackdropColor = Color.black;
+        [SerializeField, Range(0f, 1f)] float m_ExitHapticsAmplitude = 0.18f;
+        [SerializeField, Min(0f)] float m_ExitHapticsDuration = 0.12f;
+        [SerializeField, Range(0f, 1.2f)] float m_ExitCompletionAudioVolumeScale = 0.84f;
 
         Collider m_Trigger;
         MaterialPropertyBlock m_PropertyBlock;
@@ -67,8 +85,11 @@ namespace CIS5680VRGame.Gameplay
             if (m_PlayerRig == null)
                 m_PlayerRig = FindObjectOfType<XROrigin>();
 
-            if (m_TargetRenderers == null || m_TargetRenderers.Length == 0)
+            if (m_ApplyCompletedVisualState && (m_TargetRenderers == null || m_TargetRenderers.Length == 0))
                 m_TargetRenderers = GetComponentsInChildren<Renderer>(true);
+
+            if (m_ExitVisualController == null)
+                m_ExitVisualController = GetComponent<MazeExitGateVisualController>();
 
             m_MovementModeManager = FindObjectOfType<MovementModeManager>();
             m_PropertyBlock = new MaterialPropertyBlock();
@@ -82,13 +103,83 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             HasCompleted = true;
-            ApplyCompletedVisualState();
+            BeginCompletionSequence();
+        }
+
+        void BeginCompletionSequence()
+        {
+            if (m_ApplyCompletedVisualState)
+                ApplyCompletedVisualState();
             SetCompletionObjectsActive(true);
+
+            if (m_UseExitTransition)
+            {
+                StartCoroutine(ExitTransitionRoutine());
+                return;
+            }
+
+            CompleteLevelImmediately();
+        }
+
+        IEnumerator ExitTransitionRoutine()
+        {
+            m_ExitVisualController?.PlayExitActivation();
+            ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);
+            PulseAudioService.PlayLevelComplete(m_ExitCompletionAudioVolumeScale);
+
+            bool menuShown = false;
+            var settings = new TeleportViewEffectService.BlinkSettings
+            {
+                Intensity = m_ExitViewEffectIntensity,
+                PeakOpacity = m_ExitViewEffectPeakOpacity,
+                FadeOutDuration = m_ExitViewFadeOutDuration,
+                HoldDuration = m_ExitViewHoldDuration,
+                FadeInDuration = m_ExitViewFadeInDuration,
+                Tint = m_ExitViewTint,
+                CoreColor = m_ExitViewCoreColor,
+                HapticsAmplitude = m_ExitHapticsAmplitude,
+                HapticsDuration = m_ExitHapticsDuration,
+                HoldDarkAfterPeak = m_ExitHoldBlackBehindMenu,
+            };
+
+            TeleportViewEffectService.PlayBlink(settings, () =>
+            {
+                if (menuShown)
+                    return;
+
+                menuShown = true;
+                SaveProfileIfNeeded();
+                ShowCompletionMenu();
+            });
+
+            float maxWait = Mathf.Max(0.01f, m_ExitViewFadeOutDuration + m_ExitViewHoldDuration + m_ExitViewFadeInDuration + 0.12f);
+            float elapsed = 0f;
+            while (!menuShown && elapsed < maxWait)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            if (!menuShown)
+            {
+                SaveProfileIfNeeded();
+                ShowCompletionMenu();
+            }
+
+            LogCompletionIfNeeded();
+        }
+
+        void CompleteLevelImmediately()
+        {
             PulseAudioService.PlayLevelComplete(1f);
             SaveProfileIfNeeded();
             ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);
             ShowCompletionMenu();
+            LogCompletionIfNeeded();
+        }
 
+        void LogCompletionIfNeeded()
+        {
             if (m_LogCompletion)
                 Debug.Log("Maze goal reached.", this);
         }
@@ -113,6 +204,9 @@ namespace CIS5680VRGame.Gameplay
 
         void ApplyCompletedVisualState()
         {
+            if (m_TargetRenderers == null)
+                return;
+
             for (int i = 0; i < m_TargetRenderers.Length; i++)
             {
                 Renderer targetRenderer = m_TargetRenderers[i];
@@ -145,6 +239,7 @@ namespace CIS5680VRGame.Gameplay
             {
                 Camera existingMenuCamera = ModalMenuPauseUtility.ResolveMenuCamera(m_PlayerRig);
                 ModalMenuPauseUtility.RefreshWorldMenuPose(m_MenuRoot, existingMenuCamera, m_MenuLocalOffset);
+                ApplyMenuBackdropColor();
                 m_MenuRoot.SetActive(true);
                 return;
             }
@@ -158,7 +253,7 @@ namespace CIS5680VRGame.Gameplay
                 "LevelCompleteMenu",
                 menuCamera,
                 m_MenuSize,
-                new Color(0f, 0f, 0f, 0.42f),
+                ResolveMenuBackdropColor(),
                 out panelRect,
                 m_MenuLocalOffset);
 
@@ -305,6 +400,23 @@ namespace CIS5680VRGame.Gameplay
                 UIButtonSoundStyle.Cancel);
 
             ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
+        }
+
+        Color ResolveMenuBackdropColor()
+        {
+            return m_UseExitTransition && HasCompleted ? m_ExitMenuBackdropColor : m_MenuBackdropColor;
+        }
+
+        void ApplyMenuBackdropColor()
+        {
+            if (m_MenuRoot == null)
+                return;
+
+            Transform backdrop = m_MenuRoot.transform.Find("Backdrop");
+            if (backdrop == null || !backdrop.TryGetComponent(out Image backdropImage))
+                return;
+
+            backdropImage.color = ResolveMenuBackdropColor();
         }
 
         GameObject CreateUIObject(string name, Transform parent)

@@ -542,7 +542,7 @@ namespace CIS5680VRGame.Progression
                     bool showMarker = !isConsumed && (upgradeView.Definition.IsPlaceholder || canStillPurchase);
                     upgradeView.MarkerTransform.gameObject.SetActive(showMarker);
                     if (showMarker)
-                        ApplyMarkerVisual(upgradeView.MarkerTransform, upgradeView.Definition);
+                        ApplyMarkerVisual(upgradeView.MarkerTransform, upgradeView.Definition, canAfford, canStillPurchase);
                 }
             }
         }
@@ -936,10 +936,17 @@ namespace CIS5680VRGame.Progression
             return button;
         }
 
-        void ApplyMarkerVisual(Transform markerTransform, ShopUpgradeDefinition definition)
+        void ApplyMarkerVisual(Transform markerTransform, ShopUpgradeDefinition definition, bool canAfford, bool canStillPurchase)
         {
             if (markerTransform == null || definition == null)
                 return;
+
+            ShopUpgradeDisplayVisualController displayVisual = markerTransform.GetComponentInChildren<ShopUpgradeDisplayVisualController>(true);
+            if (displayVisual != null)
+            {
+                displayVisual.ApplyDefinition(definition, canAfford, canStillPurchase);
+                return;
+            }
 
             m_MarkerPropertyBlock ??= new MaterialPropertyBlock();
             Renderer markerRenderer = markerTransform.GetComponent<Renderer>();

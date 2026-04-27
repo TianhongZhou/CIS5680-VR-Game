@@ -8,7 +8,7 @@ namespace CIS5680VRGame.Gameplay
         const string LocatorPingClipPath = "Audio/Gameplay/Gameplay_LocatorPing";
         const string ResourceRestoredClipPath = "Audio/Gameplay/Gameplay_ResourceRestored";
         const string DamageTakenClipPath = "Audio/Gameplay/Gameplay_DamageTaken";
-        const string TeleportArrivalClipPath = "Audio/Gameplay/Gameplay_TeleportArrival";
+        const string TeleportArrivalClipPath = "Audio/Gameplay/Teleport/teleport_new";
         const string LevelCompleteClipPath = "Audio/Gameplay/Gameplay_LevelComplete";
 
         static PulseAudioService s_Instance;

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using CIS5680VRGame.Balls;
+using CIS5680VRGame.UI;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.XR;
@@ -23,6 +24,7 @@ namespace CIS5680VRGame.Gameplay
         const string k_HighlightMaterialResourcePath = "Materials/M_RefillStationLocatorHighlight";
         const string k_SectorShellMaterialResourcePath = "Materials/M_RefillStationSectorShell";
         const string k_ResponseRingMaterialResourcePath = "Materials/M_RefillStationResponseRing";
+        const string k_LocatorProxyName = "LocatorMarkerProxy";
         static readonly int s_BaseColorId = Shader.PropertyToID("_BaseColor");
         static readonly int s_PulseId = Shader.PropertyToID("_Pulse");
         static readonly int s_ProgressId = Shader.PropertyToID("_Progress");
@@ -59,6 +61,8 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Vector3 m_CoinResponseRingScaleMultiplier = new(0.6f, 0.6f, 0.6f);
         [SerializeField] Vector3 m_GoalHighlightScaleMultiplier = new(1.09f, 1.03f, 1.09f);
         [SerializeField] float m_GoalHighlightLift = 0.002f;
+        [SerializeField] Vector3 m_SupportStationHighlightScaleMultiplier = new(1.045f, 1.045f, 1.045f);
+        [SerializeField] float m_SupportStationHighlightLift = 0.003f;
         [SerializeField] Vector3 m_CoinHighlightScaleMultiplier = new(1.045f, 1.045f, 1.045f);
         [SerializeField] float m_CoinHighlightLift = 0f;
         [SerializeField] Color m_UnvisitedColor = new(1f, 0.64f, 0.12f, 0.9f);
@@ -69,6 +73,8 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] Color m_CoinColor = new(1f, 0.86f, 0.22f, 0.94f);
         [SerializeField] Color m_EnemyColor = new(1f, 0.24f, 0.24f, 0.96f);
         [SerializeField] Color m_SectorShellColor = new(0.98f, 0.74f, 0.24f, 0.38f);
+        [SerializeField] bool m_ShowControllerCooldownDisplay = true;
+        [SerializeField] Vector3 m_ControllerCooldownDisplayLocalOffset = new(0.115f, 0.018f, -0.052f);
 
         readonly List<XRBaseInteractor> m_PlayerInteractors = new();
         readonly List<LocatorMarker> m_LocatorMarkers = new();
@@ -90,6 +96,7 @@ namespace CIS5680VRGame.Gameplay
         MeshRenderer m_SectorShellRenderer;
         Mesh m_SectorShellMesh;
         float m_SectorShellStartedAt = -999f;
+        LocatorCooldownDisplay m_ControllerCooldownDisplay;
 
         enum LocatorMarkerKind
         {
@@ -165,6 +172,7 @@ namespace CIS5680VRGame.Gameplay
             RefreshMarkers(forceRebuild: true);
             HideAllMarkers();
             EnsureSectorShellObject();
+            EnsureControllerCooldownDisplay();
         }
 
         void ApplySharedDefaults()
@@ -180,6 +188,11 @@ namespace CIS5680VRGame.Gameplay
             float multiplier = 1f - Mathf.Clamp(reductionPercent, 0, 90) / 100f;
             m_Cooldown = Mathf.Max(0.5f, m_BaseCooldown * multiplier);
         }
+
+        public float CooldownDuration => Mathf.Max(0.1f, m_Cooldown);
+        public float CooldownRemaining => Mathf.Max(0f, m_NextAvailablePingTime - Time.unscaledTime);
+        public float CooldownProgress => Mathf.Clamp01(1f - CooldownRemaining / CooldownDuration);
+        public bool IsCooldownReady => CooldownRemaining <= 0f;
 
         public void ApplyPersistentCoinSenseRangeMeters(int rangeMeters)
         {
@@ -238,6 +251,7 @@ namespace CIS5680VRGame.Gameplay
                 return;
 
             ResolveReferences();
+            EnsureControllerCooldownDisplay();
             RefreshMarkers();
             UpdateTriggerState();
             UpdateMarkerVisibility();
@@ -303,6 +317,28 @@ namespace CIS5680VRGame.Gameplay
                     m_PlayerInteractors.Add(interactor);
                 }
             }
+        }
+
+        void EnsureControllerCooldownDisplay()
+        {
+            if (!Application.isPlaying || !m_ShowControllerCooldownDisplay)
+                return;
+
+            if (m_ControllerCooldownDisplay != null)
+            {
+                m_ControllerCooldownDisplay.Initialize(this, m_ControllerCooldownDisplayLocalOffset);
+                return;
+            }
+
+            m_ControllerCooldownDisplay = GetComponentInChildren<LocatorCooldownDisplay>(true);
+            if (m_ControllerCooldownDisplay == null)
+            {
+                var displayObject = new GameObject("LocatorCooldownDisplay");
+                displayObject.transform.SetParent(transform, false);
+                m_ControllerCooldownDisplay = displayObject.AddComponent<LocatorCooldownDisplay>();
+            }
+
+            m_ControllerCooldownDisplay.Initialize(this, m_ControllerCooldownDisplayLocalOffset);
         }
 
         void EnsureHighlightMaterial()
@@ -469,12 +505,66 @@ namespace CIS5680VRGame.Gameplay
 
         LocatorMarker CreateStationMarker(BallRefillStation station)
         {
-            return CreateMarker(station.name, LocatorMarkerKind.RefillStation, station, null);
+            LocatorMarker proxyMarker = CreateSupportStationProxyMarker(station.name, LocatorMarkerKind.RefillStation, station.transform, station, null);
+            return proxyMarker ?? CreateMarker(station.name, LocatorMarkerKind.RefillStation, station, null);
         }
 
         LocatorMarker CreateHealthStationMarker(HealthRefillStation healthStation)
         {
-            return CreateMarker(healthStation.name, LocatorMarkerKind.HealthRefillStation, null, null, null, healthStation);
+            LocatorMarker proxyMarker = CreateSupportStationProxyMarker(healthStation.name, LocatorMarkerKind.HealthRefillStation, healthStation.transform, null, healthStation);
+            return proxyMarker ?? CreateMarker(healthStation.name, LocatorMarkerKind.HealthRefillStation, null, null, null, healthStation);
+        }
+
+        LocatorMarker CreateSupportStationProxyMarker(string markerName, LocatorMarkerKind kind, Transform sourceRoot, BallRefillStation station, HealthRefillStation healthStation)
+        {
+            MeshRenderer[] proxyRenderers = ResolveMarkerProxyRenderers(sourceRoot);
+            if (proxyRenderers.Length == 0)
+                return null;
+
+            var markerRoot = new GameObject($"{markerName}_LocatorHighlight");
+            markerRoot.hideFlags = HideFlags.DontSave;
+            markerRoot.SetActive(false);
+
+            var marker = new LocatorMarker
+            {
+                Kind = kind,
+                Station = station,
+                HealthStation = healthStation,
+                RootObject = markerRoot,
+                VisibleFrom = 0f,
+                VisibleUntil = 0f,
+            };
+
+            for (int i = 0; i < proxyRenderers.Length; i++)
+            {
+                MeshRenderer sourceRenderer = proxyRenderers[i];
+                if (sourceRenderer == null)
+                    continue;
+
+                MeshFilter sourceFilter = sourceRenderer.GetComponent<MeshFilter>();
+                if (sourceFilter == null || sourceFilter.sharedMesh == null)
+                    continue;
+
+                Transform highlightTransform = CreateHighlightMesh(
+                    $"{sourceRenderer.name}_SupportHighlight",
+                    markerRoot.transform,
+                    sourceFilter.sharedMesh,
+                    out MeshRenderer highlightRenderer);
+
+                marker.GoalMeshParts.Add(new GoalMeshPart
+                {
+                    SourceTransform = sourceRenderer.transform,
+                    SourceRenderer = sourceRenderer,
+                    HighlightTransform = highlightTransform,
+                    HighlightRenderer = highlightRenderer,
+                });
+            }
+
+            if (marker.GoalMeshParts.Count > 0)
+                return marker;
+
+            DestroyMarker(marker);
+            return null;
         }
 
         LocatorMarker CreateGoalMarker(LevelGoalTrigger goal)
@@ -492,7 +582,7 @@ namespace CIS5680VRGame.Gameplay
                 VisibleUntil = 0f,
             };
 
-            var goalRenderers = goal.GetComponentsInChildren<MeshRenderer>(true);
+            MeshRenderer[] goalRenderers = ResolveGoalMarkerRenderers(goal);
             for (int i = 0; i < goalRenderers.Length; i++)
             {
                 MeshRenderer sourceRenderer = goalRenderers[i];
@@ -539,7 +629,7 @@ namespace CIS5680VRGame.Gameplay
                 VisibleUntil = 0f,
             };
 
-            var rewardRenderers = rewardPickup.GetComponentsInChildren<MeshRenderer>(true);
+            MeshRenderer[] rewardRenderers = ResolveCoinMarkerRenderers(rewardPickup);
             for (int i = 0; i < rewardRenderers.Length; i++)
             {
                 MeshRenderer sourceRenderer = rewardRenderers[i];
@@ -569,6 +659,55 @@ namespace CIS5680VRGame.Gameplay
                 return CreateMarker(rewardPickup.name, LocatorMarkerKind.CoinReward, null, null, rewardPickup);
 
             return marker;
+        }
+
+        static MeshRenderer[] ResolveCoinMarkerRenderers(RewardPickup rewardPickup)
+        {
+            if (rewardPickup == null)
+                return Array.Empty<MeshRenderer>();
+
+            MeshRenderer[] proxyRenderers = ResolveMarkerProxyRenderers(rewardPickup.transform);
+            if (proxyRenderers.Length > 0)
+                return proxyRenderers;
+
+            return rewardPickup.GetComponentsInChildren<MeshRenderer>(true);
+        }
+
+        static MeshRenderer[] ResolveGoalMarkerRenderers(LevelGoalTrigger goal)
+        {
+            if (goal == null)
+                return Array.Empty<MeshRenderer>();
+
+            MeshRenderer[] proxyRenderers = ResolveMarkerProxyRenderers(goal.transform);
+            if (proxyRenderers.Length > 0)
+                return proxyRenderers;
+
+            return goal.GetComponentsInChildren<MeshRenderer>(true);
+        }
+
+        static MeshRenderer[] ResolveMarkerProxyRenderers(Transform root)
+        {
+            if (root == null)
+                return Array.Empty<MeshRenderer>();
+
+            Transform proxyRoot = root.Find(k_LocatorProxyName);
+            if (proxyRoot != null)
+            {
+                MeshRenderer[] proxyRenderers = proxyRoot.GetComponentsInChildren<MeshRenderer>(true);
+                if (proxyRenderers.Length > 0)
+                    return proxyRenderers;
+            }
+
+            MeshRenderer[] allRenderers = root.GetComponentsInChildren<MeshRenderer>(true);
+            List<MeshRenderer> proxyMatches = new();
+            for (int i = 0; i < allRenderers.Length; i++)
+            {
+                MeshRenderer renderer = allRenderers[i];
+                if (renderer != null && renderer.name.Contains(k_LocatorProxyName))
+                    proxyMatches.Add(renderer);
+            }
+
+            return proxyMatches.ToArray();
         }
 
         LocatorMarker CreateEnemyMarker(EnemyPatrolController enemy)
@@ -927,15 +1066,25 @@ namespace CIS5680VRGame.Gameplay
 
         Vector3 ResolveMeshHighlightScaleMultiplier(LocatorMarkerKind kind)
         {
-            return kind == LocatorMarkerKind.CoinReward
-                ? m_CoinHighlightScaleMultiplier
-                : m_GoalHighlightScaleMultiplier;
+            if (kind == LocatorMarkerKind.CoinReward)
+                return m_CoinHighlightScaleMultiplier;
+
+            if (kind == LocatorMarkerKind.RefillStation || kind == LocatorMarkerKind.HealthRefillStation)
+                return m_SupportStationHighlightScaleMultiplier;
+
+            return m_GoalHighlightScaleMultiplier;
         }
 
         float ResolveMeshHighlightLift(LocatorMarkerKind kind, float sourceHeight, Vector3 scaleMultiplier)
         {
             if (kind == LocatorMarkerKind.CoinReward)
                 return Mathf.Max(0f, m_CoinHighlightLift);
+
+            if (kind == LocatorMarkerKind.RefillStation || kind == LocatorMarkerKind.HealthRefillStation)
+            {
+                float supportExtraHeight = Mathf.Max(0f, sourceHeight * (scaleMultiplier.y - 1f));
+                return supportExtraHeight * 0.5f + Mathf.Max(0f, m_SupportStationHighlightLift);
+            }
 
             float extraHeight = Mathf.Max(0f, sourceHeight * (scaleMultiplier.y - 1f));
             return extraHeight * 0.5f + Mathf.Max(0f, m_GoalHighlightLift);

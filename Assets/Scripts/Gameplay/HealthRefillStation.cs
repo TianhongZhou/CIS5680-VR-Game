@@ -21,11 +21,17 @@ namespace CIS5680VRGame.Gameplay
         }
 
         const int k_UnlimitedUseCount = 999999;
+        static readonly int k_BaseColorId = Shader.PropertyToID("_BaseColor");
+        static readonly int k_ColorId = Shader.PropertyToID("_Color");
+        static readonly int k_EmissionColorId = Shader.PropertyToID("_EmissionColor");
+        static readonly int k_RimColorId = Shader.PropertyToID("_RimColor");
 
         [SerializeField] PlayerHealth m_PlayerHealth;
         [SerializeField] XROrigin m_PlayerRig;
         [SerializeField] PulseRevealVisual m_PulseVisual;
         [SerializeField] Light m_GlowLight;
+        [SerializeField] Renderer[] m_StateLampRenderers;
+        [SerializeField] Light[] m_StateLights;
         [SerializeField] bool m_OverrideSharedDefaults;
         [SerializeField] bool m_IgnoreProgressionModifiers;
         [SerializeField] bool m_UnlimitedUses;
@@ -70,14 +76,20 @@ namespace CIS5680VRGame.Gameplay
         [SerializeField] float m_CooldownWarningLightBoost = 0.5f;
         [SerializeField] float m_CooldownOrbPulseScale = 0.12f;
         [SerializeField] float m_ReadyOrbPulseScale = 0.03f;
+        [SerializeField] bool m_IgnoreEnemyCollisions = true;
+        [SerializeField, Min(0.1f)] float m_EnemyCollisionRefreshInterval = 1f;
 
         XRSimpleInteractable m_Interactable;
         float m_CooldownEndsAt = -999f;
         readonly HashSet<IXRHoverInteractor> m_HoveringInteractors = new();
+        readonly HashSet<Collider> m_IgnoredEnemyColliders = new();
         GameObject m_HoverPromptObject;
         RectTransform m_HoverPromptRect;
         TextMeshProUGUI m_HoverPromptText;
         Transform m_PromptFaceTarget;
+        MaterialPropertyBlock m_LampPropertyBlock;
+        Collider[] m_OwnColliders;
+        float m_NextEnemyCollisionRefreshTime;
         Vector3 m_OrbBaseLocalScale = Vector3.one;
         int m_PersistentRestoreBonusPercent;
         int m_PersistentUseBonus;
@@ -148,6 +160,7 @@ namespace CIS5680VRGame.Gameplay
             ApplySharedDefaults();
 
             m_Interactable = GetComponent<XRSimpleInteractable>();
+            m_OwnColliders = GetComponentsInChildren<Collider>(true);
 
             if (m_PlayerHealth == null)
                 m_PlayerHealth = FindObjectOfType<PlayerHealth>();
@@ -161,14 +174,22 @@ namespace CIS5680VRGame.Gameplay
             if (m_GlowLight == null)
                 m_GlowLight = GetComponentInChildren<Light>(true);
 
+            if (m_StateLampRenderers == null || m_StateLampRenderers.Length == 0)
+                m_StateLampRenderers = ResolveStateLampRenderers();
+
+            if (m_StateLights == null || m_StateLights.Length == 0)
+                m_StateLights = GetComponentsInChildren<Light>(true);
+
             if (m_OrbVisualRoot == null && m_GlowLight != null)
                 m_OrbVisualRoot = m_GlowLight.transform;
 
             if (m_OrbVisualRoot != null)
                 m_OrbBaseLocalScale = m_OrbVisualRoot.localScale;
 
+            m_LampPropertyBlock = new MaterialPropertyBlock();
             m_UsesRemaining = MaxUses;
             ResolvePromptFaceTarget();
+            RefreshIgnoredEnemyCollisions(force: true);
             UpdateVisualState();
         }
 
@@ -193,6 +214,7 @@ namespace CIS5680VRGame.Gameplay
             }
 
             m_HoveringInteractors.Clear();
+            ClearIgnoredEnemyCollisions();
             SetPromptVisible(false);
         }
 
@@ -209,6 +231,7 @@ namespace CIS5680VRGame.Gameplay
 
         void Update()
         {
+            RefreshIgnoredEnemyCollisions(force: false);
             UpdateVisualState();
             UpdateHoverPrompt();
         }
@@ -296,17 +319,13 @@ namespace CIS5680VRGame.Gameplay
 
         void UpdateVisualState()
         {
+            if (m_LampPropertyBlock == null)
+                m_LampPropertyBlock = new MaterialPropertyBlock();
+
             if (IsDepleted)
             {
                 ApplyOrbScale(1f);
-                m_PulseVisual?.SetVisual(m_DepletedBackgroundColor, m_DepletedPulseColor, m_DepletedEmissionStrength);
-
-                if (m_GlowLight != null)
-                {
-                    m_GlowLight.color = m_DepletedPulseColor;
-                    m_GlowLight.intensity = m_DepletedLightIntensity;
-                }
-
+                ApplyLampState(m_DepletedPulseColor, m_DepletedEmissionStrength, m_DepletedLightIntensity);
                 return;
             }
 
@@ -326,13 +345,8 @@ namespace CIS5680VRGame.Gameplay
                 pulseColor = m_ReadyPulseColor;
                 emissionStrength = m_ReadyEmissionStrength + readyWave * (m_LightPulseAmplitude * 0.55f);
                 ApplyOrbScale(1f + readyWave * m_ReadyOrbPulseScale);
-
-                if (m_GlowLight != null)
-                {
-                    float pulseBoost = readyWave * m_LightPulseAmplitude;
-                    m_GlowLight.color = m_ReadyPulseColor;
-                    m_GlowLight.intensity = m_ReadyLightIntensity + pulseBoost;
-                }
+                float pulseBoost = readyWave * m_LightPulseAmplitude;
+                ApplyLampState(pulseColor, emissionStrength, m_ReadyLightIntensity + pulseBoost);
             }
             else
             {
@@ -343,16 +357,10 @@ namespace CIS5680VRGame.Gameplay
                 emissionStrength = Mathf.Lerp(m_CooldownEmissionStrength, m_ReadyEmissionStrength * 0.7f, readinessTint * 0.45f)
                     + flashWave * m_CooldownWarningFlashEmission;
                 ApplyOrbScale(1f + flashWave * m_CooldownOrbPulseScale);
-
-                if (m_GlowLight != null)
-                {
-                    m_GlowLight.color = pulseColor;
-                    m_GlowLight.intensity = Mathf.Lerp(m_CooldownLightIntensity, m_ReadyLightIntensity * 0.72f, readinessTint * 0.55f)
-                        + flashWave * m_CooldownWarningLightBoost;
-                }
+                float lightIntensity = Mathf.Lerp(m_CooldownLightIntensity, m_ReadyLightIntensity * 0.72f, readinessTint * 0.55f)
+                    + flashWave * m_CooldownWarningLightBoost;
+                ApplyLampState(pulseColor, emissionStrength, lightIntensity);
             }
-
-            m_PulseVisual?.SetVisual(backgroundColor, pulseColor, emissionStrength);
         }
 
         void UpdateHoverPrompt()
@@ -486,6 +494,72 @@ namespace CIS5680VRGame.Gameplay
             }
         }
 
+        void ApplyLampState(Color color, float emissionStrength, float lightIntensity)
+        {
+            if (m_StateLampRenderers != null)
+            {
+                for (int i = 0; i < m_StateLampRenderers.Length; i++)
+                {
+                    Renderer targetRenderer = m_StateLampRenderers[i];
+                    if (targetRenderer == null)
+                        continue;
+
+                    targetRenderer.GetPropertyBlock(m_LampPropertyBlock);
+                    m_LampPropertyBlock.SetColor(k_BaseColorId, color);
+                    m_LampPropertyBlock.SetColor(k_ColorId, color);
+                    m_LampPropertyBlock.SetColor(k_EmissionColorId, color * Mathf.Max(0f, emissionStrength));
+                    m_LampPropertyBlock.SetColor(k_RimColorId, color);
+                    targetRenderer.SetPropertyBlock(m_LampPropertyBlock);
+                }
+            }
+
+            if (m_StateLights != null)
+            {
+                for (int i = 0; i < m_StateLights.Length; i++)
+                {
+                    Light stateLight = m_StateLights[i];
+                    if (stateLight == null)
+                        continue;
+
+                    stateLight.color = color;
+                    stateLight.intensity = Mathf.Max(0f, lightIntensity);
+                }
+            }
+            else if (m_GlowLight != null)
+            {
+                m_GlowLight.color = color;
+                m_GlowLight.intensity = Mathf.Max(0f, lightIntensity);
+            }
+        }
+
+        Renderer[] ResolveStateLampRenderers()
+        {
+            Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+            List<Renderer> lamps = new(renderers.Length);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null)
+                    continue;
+
+                string rendererName = renderer.name.ToLowerInvariant();
+                if (rendererName.Contains("locator") || rendererName.Contains("proxy") || rendererName.Contains("black")
+                    || rendererName.Contains("base") || rendererName.Contains("housing") || rendererName.Contains("glass")
+                    || rendererName.Contains("transparent") || rendererName.Contains("capsule") || rendererName.Contains("rail"))
+                {
+                    continue;
+                }
+
+                if (rendererName.Contains("emissive") || rendererName.Contains("status") || rendererName.Contains("glyph")
+                    || rendererName.Contains("pulse") || rendererName.Contains("core") || rendererName.Contains("tick"))
+                {
+                    lamps.Add(renderer);
+                }
+            }
+
+            return lamps.Count > 0 ? lamps.ToArray() : renderers;
+        }
+
         void ApplySharedDefaults()
         {
             if (m_OverrideSharedDefaults)
@@ -496,6 +570,70 @@ namespace CIS5680VRGame.Gameplay
             m_MaxUses = SharedDefaults.MaxUses;
             m_BaseRestoreAmount = SharedDefaults.BaseRestoreAmount;
             m_Cooldown = SharedDefaults.Cooldown;
+        }
+
+        void RefreshIgnoredEnemyCollisions(bool force)
+        {
+            if (!Application.isPlaying || !m_IgnoreEnemyCollisions)
+                return;
+
+            if (!force && Time.time < m_NextEnemyCollisionRefreshTime)
+                return;
+
+            m_NextEnemyCollisionRefreshTime = Time.time + Mathf.Max(0.1f, m_EnemyCollisionRefreshInterval);
+
+            if (m_OwnColliders == null || m_OwnColliders.Length == 0)
+                m_OwnColliders = GetComponentsInChildren<Collider>(true);
+
+            EnemyPatrolController[] enemies = FindObjectsOfType<EnemyPatrolController>(true);
+            for (int i = 0; i < enemies.Length; i++)
+            {
+                if (enemies[i] == null)
+                    continue;
+
+                Collider[] enemyColliders = enemies[i].GetComponentsInChildren<Collider>(true);
+                for (int j = 0; j < enemyColliders.Length; j++)
+                {
+                    Collider enemyCollider = enemyColliders[j];
+                    if (enemyCollider == null || !m_IgnoredEnemyColliders.Add(enemyCollider))
+                        continue;
+
+                    for (int k = 0; k < m_OwnColliders.Length; k++)
+                    {
+                        Collider ownCollider = m_OwnColliders[k];
+                        if (ownCollider == null || ownCollider == enemyCollider)
+                            continue;
+
+                        Physics.IgnoreCollision(ownCollider, enemyCollider, true);
+                    }
+                }
+            }
+        }
+
+        void ClearIgnoredEnemyCollisions()
+        {
+            if (m_OwnColliders == null || m_OwnColliders.Length == 0 || m_IgnoredEnemyColliders.Count == 0)
+            {
+                m_IgnoredEnemyColliders.Clear();
+                return;
+            }
+
+            foreach (Collider enemyCollider in m_IgnoredEnemyColliders)
+            {
+                if (enemyCollider == null)
+                    continue;
+
+                for (int i = 0; i < m_OwnColliders.Length; i++)
+                {
+                    Collider ownCollider = m_OwnColliders[i];
+                    if (ownCollider == null || ownCollider == enemyCollider)
+                        continue;
+
+                    Physics.IgnoreCollision(ownCollider, enemyCollider, false);
+                }
+            }
+
+            m_IgnoredEnemyColliders.Clear();
         }
 
         void AdjustRemainingUses(int previousMaxUses, int newMaxUses)

@@ -88,6 +88,8 @@ namespace CIS5680VRGame.Generation
         [SerializeField, HideInInspector, Min(4)] int m_MinGoalDistanceFromStart = 7;
         [SerializeField, HideInInspector, Min(0)] int m_BranchFreeStartCells = 3;
         [SerializeField, HideInInspector, Min(0)] int m_PreferredStraightStartCells = 3;
+        [SerializeField, HideInInspector, Min(0)] int m_MaxBranchlessMainPathCells = 6;
+        [SerializeField, HideInInspector] float m_FirstBranchAnchorRatio = 0.2f;
         [SerializeField, HideInInspector] float m_StartZoneRatio = 0.25f;
         [SerializeField, HideInInspector] float m_MidZoneRatio = 0.35f;
 
@@ -199,12 +201,16 @@ namespace CIS5680VRGame.Generation
             int minGoalDistanceFromStart,
             int branchFreeStartCells,
             int preferredStraightStartCells,
+            int maxBranchlessMainPathCells,
+            float firstBranchAnchorRatio,
             float startZoneRatio,
             float midZoneRatio)
         {
             m_MinGoalDistanceFromStart = Mathf.Max(4, minGoalDistanceFromStart);
             m_BranchFreeStartCells = Mathf.Max(0, branchFreeStartCells);
             m_PreferredStraightStartCells = Mathf.Max(0, preferredStraightStartCells);
+            m_MaxBranchlessMainPathCells = Mathf.Max(0, maxBranchlessMainPathCells);
+            m_FirstBranchAnchorRatio = Mathf.Clamp01(firstBranchAnchorRatio);
             m_StartZoneRatio = Mathf.Clamp01(startZoneRatio);
             m_MidZoneRatio = Mathf.Clamp01(midZoneRatio);
             NormalizeSerializedValues();
@@ -270,6 +276,8 @@ namespace CIS5680VRGame.Generation
             m_MinGoalDistanceFromStart = Mathf.Max(4, m_MinGoalDistanceFromStart);
             m_BranchFreeStartCells = Mathf.Max(0, m_BranchFreeStartCells);
             m_PreferredStraightStartCells = Mathf.Max(0, m_PreferredStraightStartCells);
+            m_MaxBranchlessMainPathCells = Mathf.Max(0, m_MaxBranchlessMainPathCells);
+            m_FirstBranchAnchorRatio = Mathf.Clamp01(m_FirstBranchAnchorRatio);
             m_StartZoneRatio = Mathf.Clamp01(m_StartZoneRatio);
             m_MidZoneRatio = Mathf.Clamp01(m_MidZoneRatio);
 
@@ -882,16 +890,11 @@ namespace CIS5680VRGame.Generation
                 return;
 
             int requestedBranchCount = rng.Next(m_MinBranchCount, m_MaxBranchCount + 1);
-            if (requestedBranchCount <= 0)
+            if (requestedBranchCount <= 0 && m_MaxBranchlessMainPathCells <= 0)
                 return;
 
-            int branchSafeStartIndex = Mathf.Clamp(m_BranchFreeStartCells, 1, mainPath.Count - 2);
-            int midLateStartIndex = Mathf.Max(branchSafeStartIndex, Mathf.CeilToInt((mainPath.Count - 1) * 0.5f));
-            var anchorCandidates = new List<int>();
-            for (int i = midLateStartIndex; i < mainPath.Count - 1; i++)
-                anchorCandidates.Add(i);
-
-            Shuffle(anchorCandidates, rng);
+            int firstBranchAnchorIndex = ResolveFirstBranchAnchorIndex(mainPath.Count);
+            List<int> anchorCandidates = BuildBranchAnchorCandidates(rng, firstBranchAnchorIndex, mainPath.Count);
 
             int branchesBuilt = 0;
             for (int i = 0; i < anchorCandidates.Count && branchesBuilt < requestedBranchCount; i++)
@@ -904,7 +907,170 @@ namespace CIS5680VRGame.Generation
                 branchesBuilt++;
             }
 
+            FillBranchlessMainPathGaps(layout, rng, bounds, mainPath, firstBranchAnchorIndex, ref branchesBuilt);
             layout.BranchCount = branchesBuilt;
+        }
+
+        int ResolveFirstBranchAnchorIndex(int mainPathCount)
+        {
+            int latestAnchorIndex = Mathf.Max(1, mainPathCount - 2);
+            int branchSafeStartIndex = Mathf.Clamp(m_BranchFreeStartCells, 1, latestAnchorIndex);
+            int ratioStartIndex = Mathf.CeilToInt((mainPathCount - 1) * m_FirstBranchAnchorRatio);
+            return Mathf.Clamp(Mathf.Max(branchSafeStartIndex, ratioStartIndex), 1, latestAnchorIndex);
+        }
+
+        static List<int> BuildBranchAnchorCandidates(System.Random rng, int firstBranchAnchorIndex, int mainPathCount)
+        {
+            int latestAnchorIndex = Mathf.Max(1, mainPathCount - 2);
+            int firstIndex = Mathf.Clamp(firstBranchAnchorIndex, 1, latestAnchorIndex);
+            int candidateCount = Mathf.Max(0, latestAnchorIndex - firstIndex + 1);
+            var candidates = new List<int>(candidateCount);
+            if (candidateCount <= 0)
+                return candidates;
+
+            int earlyWindowCount = Mathf.Clamp(Mathf.CeilToInt(candidateCount * 0.35f), 1, candidateCount);
+            int earlyWindowEnd = firstIndex + earlyWindowCount - 1;
+
+            var earlyCandidates = new List<int>(earlyWindowCount);
+            var remainingCandidates = new List<int>(Mathf.Max(0, candidateCount - earlyWindowCount));
+            for (int i = firstIndex; i <= latestAnchorIndex; i++)
+            {
+                if (i <= earlyWindowEnd)
+                    earlyCandidates.Add(i);
+                else
+                    remainingCandidates.Add(i);
+            }
+
+            Shuffle(earlyCandidates, rng);
+            Shuffle(remainingCandidates, rng);
+            candidates.AddRange(earlyCandidates);
+            candidates.AddRange(remainingCandidates);
+            return candidates;
+        }
+
+        void FillBranchlessMainPathGaps(
+            MazeLayout layout,
+            System.Random rng,
+            RectInt bounds,
+            IReadOnlyList<Vector2Int> mainPath,
+            int firstBranchAnchorIndex,
+            ref int branchesBuilt)
+        {
+            if (m_MaxBranchlessMainPathCells <= 0
+                || layout == null
+                || rng == null
+                || mainPath == null
+                || mainPath.Count < 3
+                || branchesBuilt >= m_MaxBranchCount)
+            {
+                return;
+            }
+
+            int latestAnchorIndex = Mathf.Max(1, mainPath.Count - 2);
+            int firstIndex = Mathf.Clamp(firstBranchAnchorIndex, 1, latestAnchorIndex);
+            int remainingAttempts = Mathf.Max(1, m_MaxBranchCount - branchesBuilt) * 4;
+
+            while (branchesBuilt < m_MaxBranchCount && remainingAttempts-- > 0)
+            {
+                List<int> gapAnchorCandidates = BuildBranchlessGapAnchorCandidates(layout, rng, mainPath, firstIndex, latestAnchorIndex);
+                if (gapAnchorCandidates.Count == 0)
+                    return;
+
+                bool addedBranch = false;
+                for (int i = 0; i < gapAnchorCandidates.Count && branchesBuilt < m_MaxBranchCount; i++)
+                {
+                    Vector2Int anchor = mainPath[gapAnchorCandidates[i]];
+                    int desiredLength = rng.Next(m_MinBranchLength, m_MaxBranchLength + 1);
+                    if (!TryBuildBranch(layout, rng, bounds, anchor, desiredLength))
+                        continue;
+
+                    branchesBuilt++;
+                    addedBranch = true;
+                    break;
+                }
+
+                if (!addedBranch)
+                    return;
+            }
+        }
+
+        List<int> BuildBranchlessGapAnchorCandidates(
+            MazeLayout layout,
+            System.Random rng,
+            IReadOnlyList<Vector2Int> mainPath,
+            int firstIndex,
+            int latestAnchorIndex)
+        {
+            var gaps = new List<BranchlessMainPathGap>();
+            int gapStartIndex = firstIndex;
+            for (int i = firstIndex; i <= latestAnchorIndex + 1; i++)
+            {
+                bool reachedEnd = i > latestAnchorIndex;
+                bool hasBranch = !reachedEnd && HasMainPathSideBranch(layout, mainPath[i]);
+                if (!reachedEnd && !hasBranch)
+                    continue;
+
+                int gapEndIndex = i - 1;
+                int gapLength = gapEndIndex - gapStartIndex + 1;
+                if (gapLength > m_MaxBranchlessMainPathCells)
+                    gaps.Add(new BranchlessMainPathGap(gapStartIndex, gapEndIndex, gapLength, rng.Next()));
+
+                gapStartIndex = i + 1;
+            }
+
+            gaps.Sort((left, right) =>
+            {
+                int comparison = right.Length.CompareTo(left.Length);
+                if (comparison != 0)
+                    return comparison;
+
+                return left.TieBreaker.CompareTo(right.TieBreaker);
+            });
+
+            var candidates = new List<int>();
+            var used = new HashSet<int>();
+            for (int i = 0; i < gaps.Count; i++)
+                AddGapCenteredAnchorCandidates(gaps[i], candidates, used);
+
+            return candidates;
+        }
+
+        static void AddGapCenteredAnchorCandidates(BranchlessMainPathGap gap, ICollection<int> candidates, ISet<int> used)
+        {
+            int center = Mathf.FloorToInt((gap.StartIndex + gap.EndIndex) * 0.5f);
+            int maxOffset = Mathf.Max(center - gap.StartIndex, gap.EndIndex - center);
+            for (int offset = 0; offset <= maxOffset; offset++)
+            {
+                TryAddGapAnchorCandidate(center - offset, gap, candidates, used);
+                if (offset > 0)
+                    TryAddGapAnchorCandidate(center + offset, gap, candidates, used);
+            }
+        }
+
+        static void TryAddGapAnchorCandidate(int index, BranchlessMainPathGap gap, ICollection<int> candidates, ISet<int> used)
+        {
+            if (index < gap.StartIndex || index > gap.EndIndex || !used.Add(index))
+                return;
+
+            candidates.Add(index);
+        }
+
+        static bool HasMainPathSideBranch(MazeLayout layout, Vector2Int mainPathPosition)
+        {
+            if (layout == null || !layout.TryGetCell(mainPathPosition, out MazeCellData mainPathCell) || mainPathCell == null)
+                return false;
+
+            for (int i = 0; i < CardinalDirections.Length; i++)
+            {
+                Vector2Int neighborPosition = mainPathPosition + CardinalDirections[i];
+                if (!layout.TryGetCell(neighborPosition, out MazeCellData neighbor) || neighbor == null || neighbor.IsMainPath)
+                    continue;
+
+                if (AreCellsConnected(mainPathCell, neighbor))
+                    return true;
+            }
+
+            return false;
         }
 
         bool TryBuildBranch(
@@ -2751,6 +2917,22 @@ namespace CIS5680VRGame.Generation
 
             public Vector2Int Position { get; }
             public int Score { get; }
+            public int TieBreaker { get; }
+        }
+
+        readonly struct BranchlessMainPathGap
+        {
+            public BranchlessMainPathGap(int startIndex, int endIndex, int length, int tieBreaker)
+            {
+                StartIndex = startIndex;
+                EndIndex = endIndex;
+                Length = length;
+                TieBreaker = tieBreaker;
+            }
+
+            public int StartIndex { get; }
+            public int EndIndex { get; }
+            public int Length { get; }
             public int TieBreaker { get; }
         }
 

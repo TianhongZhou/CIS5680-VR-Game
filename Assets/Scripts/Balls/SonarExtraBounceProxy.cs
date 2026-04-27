@@ -56,6 +56,9 @@ namespace CIS5680VRGame.Balls
                 bounceProxy = sourceBall.AddComponent<SonarExtraBounceProxy>();
 
             bounceProxy.Initialize(pulseManager, pulseRadius, validGroundLayers, minGroundUpDot, requireGroundContact);
+
+            if (sourceBall.TryGetComponent(out SonarProbeBallVisualController visualController))
+                visualController.BeginExtraBounceFlightVisuals();
         }
 
         void Initialize(

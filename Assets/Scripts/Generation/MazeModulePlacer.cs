@@ -39,6 +39,8 @@ namespace CIS5680VRGame.Generation
         const string DefaultStartPrefabPath = "Assets/Prefabs/Gameplay/MazeStartPad.prefab";
         const string DefaultHealthRefillPrefabPath = "Assets/Prefabs/Gameplay/HealthRefillStation.prefab";
         const string DefaultRobotScoutEnemyPrefabPath = "Assets/Prefabs/Enemies/RobotScoutEnemy.prefab";
+        const string DefaultRewardPrefabPath = "Assets/Resources/Gameplay/Rewards/GoldenSciFiCoinPickup.prefab";
+        const string DefaultRewardPrefabResourcePath = "Gameplay/Rewards/GoldenSciFiCoinPickup";
         const string DefaultRenderSkinMeshAssetPath = "Assets/Generated/Maze/RandomMazeRenderSkin.asset";
         const string DefaultRenderSkinMaterialAssetPath = "Assets/Generated/Maze/M_RandomMazeRenderSkinPulse.mat";
         const string HiddenDoorPulseHitClipResourcePath = "Audio/Gameplay/HiddenDoor/pulse_hit_hidden_wall";
@@ -52,6 +54,7 @@ namespace CIS5680VRGame.Generation
         static AudioClip s_DefaultHiddenDoorTriggeredClip;
         static AudioClip s_DefaultHiddenDoorOpenedClip;
         static AudioClip s_DefaultHiddenDoorProgressResetClip;
+        static GameObject s_DefaultRewardPrefab;
 
         [Header("Placement")]
         [SerializeField] bool m_AlignStartToAnchor = true;
@@ -64,6 +67,7 @@ namespace CIS5680VRGame.Generation
         [SerializeField] BallRefillStation m_RefillTemplate;
         [SerializeField] HealthRefillStation m_HealthRefillTemplate;
         [SerializeField] GameObject m_TrapPrefab;
+        [SerializeField] GameObject m_RewardPrefab;
         [SerializeField] Material m_FloorRevealMaterial;
         [SerializeField] Material m_WallRevealMaterial;
         [SerializeField] Material m_EditorPreviewFloorMaterial;
@@ -1482,19 +1486,27 @@ namespace CIS5680VRGame.Generation
             switch (cell.Role)
             {
                 case MazeCellRole.Start:
-                    return InstantiateTemplate(
+                {
+                    GameObject startInstance = InstantiateTemplate(
                         m_StartPrefab,
                         startRoot,
                         cell,
                         "GeneratedStartPad",
                         m_StartLocalOffset);
+                    AlignStartEntranceToOpenConnection(startInstance, cell);
+                    return startInstance;
+                }
                 case MazeCellRole.Goal:
-                    return InstantiateTemplate(
+                {
+                    GameObject goalInstance = InstantiateTemplate(
                         m_GoalPrefab,
                         bootstrap.GoalRoot,
                         cell,
                         "GeneratedGoalBeacon",
                         m_GoalLocalOffset);
+                    AlignGoalExitToOpenConnection(goalInstance, cell);
+                    return goalInstance;
+                }
                 case MazeCellRole.Refill:
                     return InstantiateTemplate(
                         m_RefillTemplate != null ? m_RefillTemplate.gameObject : null,
@@ -1526,6 +1538,56 @@ namespace CIS5680VRGame.Generation
             return null;
         }
 
+        static void AlignStartEntranceToOpenConnection(GameObject instance, MazeCellData cell)
+        {
+            if (instance == null || cell == null)
+                return;
+
+            Vector2Int mazeDirection = ResolvePrimaryConnectionDirection(cell.Connections);
+            if (mazeDirection == Vector2Int.zero)
+                return;
+
+            // The imported gate's maze-facing side is its local -Z side.
+            Vector3 rootForward = new(-mazeDirection.x, 0f, -mazeDirection.y);
+            if (rootForward.sqrMagnitude <= 0.0001f)
+                return;
+
+            instance.transform.rotation = Quaternion.LookRotation(rootForward.normalized, Vector3.up);
+        }
+
+        static void AlignGoalExitToOpenConnection(GameObject instance, MazeCellData cell)
+        {
+            if (instance == null || cell == null)
+                return;
+
+            Vector2Int approachDirection = ResolvePrimaryConnectionDirection(cell.Connections);
+            if (approachDirection == Vector2Int.zero)
+                return;
+
+            Vector3 rootForward = new(approachDirection.x, 0f, approachDirection.y);
+            if (rootForward.sqrMagnitude <= 0.0001f)
+                return;
+
+            instance.transform.rotation = Quaternion.LookRotation(rootForward.normalized, Vector3.up);
+        }
+
+        static Vector2Int ResolvePrimaryConnectionDirection(MazeCellConnection connections)
+        {
+            if (connections.HasFlag(MazeCellConnection.North))
+                return ResolveConnectionDirection(MazeCellConnection.North);
+
+            if (connections.HasFlag(MazeCellConnection.East))
+                return ResolveConnectionDirection(MazeCellConnection.East);
+
+            if (connections.HasFlag(MazeCellConnection.South))
+                return ResolveConnectionDirection(MazeCellConnection.South);
+
+            if (connections.HasFlag(MazeCellConnection.West))
+                return ResolveConnectionDirection(MazeCellConnection.West);
+
+            return Vector2Int.zero;
+        }
+
         GameObject InstantiateTemplate(
             GameObject template,
             Transform parent,
@@ -1551,6 +1613,19 @@ namespace CIS5680VRGame.Generation
             if (parent == null)
                 return null;
 
+            GameObject rewardPrefab = ResolveRewardPrefab();
+            if (rewardPrefab != null)
+            {
+                GameObject rewardInstance = Instantiate(rewardPrefab, parent);
+                rewardInstance.name = instanceName;
+                rewardInstance.transform.SetPositionAndRotation(
+                    ResolveCellWorldPosition(cell.GridPosition) + m_RewardLocalOffset,
+                    rewardPrefab.transform.rotation);
+                rewardInstance.transform.localScale = rewardPrefab.transform.localScale;
+                ConfigureGeneratedReward(rewardInstance);
+                return rewardInstance;
+            }
+
             var rewardRoot = new GameObject(instanceName);
             rewardRoot.transform.SetParent(parent, false);
             rewardRoot.transform.position = ResolveCellWorldPosition(cell.GridPosition) + m_RewardLocalOffset;
@@ -1573,6 +1648,41 @@ namespace CIS5680VRGame.Generation
                 3f);
 
             return rewardRoot;
+        }
+
+        void ConfigureGeneratedReward(GameObject rewardRoot)
+        {
+            if (rewardRoot == null)
+                return;
+
+            RewardPlaceholderVisual placeholderVisual = rewardRoot.GetComponent<RewardPlaceholderVisual>();
+            if (placeholderVisual == null)
+                placeholderVisual = rewardRoot.AddComponent<RewardPlaceholderVisual>();
+
+            placeholderVisual.ResetBaseLocalPosition();
+
+            SphereCollider trigger = rewardRoot.GetComponent<SphereCollider>();
+            if (trigger == null)
+                trigger = rewardRoot.AddComponent<SphereCollider>();
+
+            trigger.isTrigger = true;
+            trigger.radius = m_RewardTriggerRadius;
+
+            RewardPickup pickup = rewardRoot.GetComponent<RewardPickup>();
+            if (pickup == null)
+                pickup = rewardRoot.AddComponent<RewardPickup>();
+
+            pickup.Configure(RunRewardType.Coin, m_DefaultRewardAmount);
+
+            AttachPulseRevealVisual(
+                rewardRoot,
+                new Color(0.08f, 0.048f, 0.005f, 1f),
+                new Color(1f, 0.84f, 0.18f, 1f),
+                3f);
+
+            CoinPickupVisualController visualController = rewardRoot.GetComponent<CoinPickupVisualController>();
+            if (visualController != null)
+                visualController.RefreshTargets();
         }
 
         void CreateCoinVisual(Transform parent)
@@ -2397,6 +2507,9 @@ namespace CIS5680VRGame.Generation
 
             if (m_RobotScoutEnemyPrefab == null)
                 m_RobotScoutEnemyPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(DefaultRobotScoutEnemyPrefabPath);
+
+            if (m_RewardPrefab == null)
+                m_RewardPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(DefaultRewardPrefabPath);
 #endif
         }
 
@@ -2424,6 +2537,17 @@ namespace CIS5680VRGame.Generation
         Material ResolveWallMaterial()
         {
             return m_WallRevealMaterial != null ? m_WallRevealMaterial : m_EditorPreviewWallMaterial;
+        }
+
+        GameObject ResolveRewardPrefab()
+        {
+            if (m_RewardPrefab != null)
+                return m_RewardPrefab;
+
+            if (s_DefaultRewardPrefab == null)
+                s_DefaultRewardPrefab = Resources.Load<GameObject>(DefaultRewardPrefabResourcePath);
+
+            return s_DefaultRewardPrefab;
         }
 
         Material ResolveGuidePipelineBaseMaterial()

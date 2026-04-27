@@ -13,6 +13,11 @@ namespace CIS5680VRGame.Generation
 
         void Awake()
         {
+            ResetBaseLocalPosition();
+        }
+
+        public void ResetBaseLocalPosition()
+        {
             m_BaseLocalPosition = transform.localPosition;
         }
 

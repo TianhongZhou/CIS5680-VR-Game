@@ -21,6 +21,7 @@ namespace CIS5680VRGame.Balls
             Idle,
             Aiming,
             ProjectileFlying,
+            AnchorArming,
             AnchorReady,
         }
 
@@ -65,7 +66,9 @@ namespace CIS5680VRGame.Balls
         [SerializeField] float m_FallbackPreviewRadius = 0.12f;
         [SerializeField] LayerMask m_PreviewCollisionLayers = ~0;
         [SerializeField] float m_ProjectileLifetime = 8f;
+        [SerializeField, Min(0f)] float m_AnchorArmingDuration = 0.72f;
         [SerializeField] float m_AnchorLifetime = 8f;
+        [SerializeField, Min(0f)] float m_PostDisappearLaunchLockout = 0.55f;
 
         [Header("Preview")]
         [SerializeField] float m_LineWidth = 0.025f;
@@ -98,7 +101,9 @@ namespace CIS5680VRGame.Balls
         TeleportImpactEffect m_AnchorEffect;
         BallImpactContext m_AnchorContext;
         float m_ProjectileExpireTime;
+        float m_AnchorReadyTime;
         float m_AnchorExpireTime;
+        float m_LaunchLockedUntil;
         LineRenderer m_PreviewLine;
         GameObject m_PreviewMarker;
         Renderer m_PreviewMarkerRenderer;
@@ -276,6 +281,17 @@ namespace CIS5680VRGame.Balls
                         CancelActiveTeleport();
                     break;
 
+                case LauncherState.AnchorArming:
+                    if (m_ActiveProjectile == null)
+                    {
+                        CancelActiveTeleport();
+                    }
+                    else if (Time.time >= m_AnchorReadyTime)
+                    {
+                        CompleteAnchorArming();
+                    }
+                    break;
+
                 case LauncherState.AnchorReady:
                     RefreshAnchorHintUI();
                     if (primaryDown)
@@ -294,8 +310,8 @@ namespace CIS5680VRGame.Balls
             if (m_TeleportBallPrefab == null || m_LaunchOrigin == null)
                 return;
 
-            if (m_State == LauncherState.AnchorReady || m_State == LauncherState.ProjectileFlying)
-                CancelActiveTeleport();
+            if (IsTeleportLaunchLocked())
+                return;
 
             m_State = LauncherState.Aiming;
             EnsurePreviewObjects();
@@ -349,6 +365,12 @@ namespace CIS5680VRGame.Balls
                 return;
             }
 
+            if (IsTeleportLaunchLocked())
+            {
+                m_State = LauncherState.Idle;
+                return;
+            }
+
             CancelActiveProjectileOnly();
 
             GameObject projectile = Instantiate(
@@ -388,19 +410,57 @@ namespace CIS5680VRGame.Balls
             if (context.BallObject != m_ActiveProjectile)
                 return false;
 
+            TeleportBallVisualController visualController = m_ActiveProjectile.GetComponent<TeleportBallVisualController>();
+            Vector3 anchorNormal = context.HitNormal.sqrMagnitude > 0.0001f ? context.HitNormal.normalized : Vector3.up;
+            Vector3 anchorPoint = visualController != null
+                ? visualController.ResolveAlignedAnchorPoint(context.HitPoint, anchorNormal)
+                : context.HitPoint;
+
             m_AnchorEffect = teleportEffect;
-            m_AnchorContext = context;
-            m_AnchorExpireTime = Time.time + Mathf.Max(1f, m_AnchorLifetime);
-            m_State = LauncherState.AnchorReady;
+            m_AnchorContext = CreateAlignedAnchorContext(context, anchorPoint, anchorNormal);
+            float armingDuration = Mathf.Max(0f, m_AnchorArmingDuration);
+            m_AnchorReadyTime = Time.time + armingDuration;
+            m_AnchorExpireTime = m_AnchorReadyTime + Mathf.Max(1f, m_AnchorLifetime);
+            m_State = armingDuration > 0.01f ? LauncherState.AnchorArming : LauncherState.AnchorReady;
 
             ThrowableBall throwableBall = m_ActiveProjectile.GetComponent<ThrowableBall>();
             if (throwableBall != null)
                 throwableBall.FreezeAsAnchor();
 
-            ApplyAnchorVisual(m_ActiveProjectile);
+            ApplyAnchorVisual(m_ActiveProjectile, anchorPoint, anchorNormal, m_AnchorReadyTime, m_AnchorExpireTime);
+
+            if (m_State == LauncherState.AnchorReady)
+            {
+                CompleteAnchorArming();
+            }
+            else
+            {
+                SetAnchorHintVisible(false);
+            }
+            return true;
+        }
+
+        static BallImpactContext CreateAlignedAnchorContext(in BallImpactContext context, Vector3 anchorPoint, Vector3 anchorNormal)
+        {
+            return context.Collision != null
+                ? new BallImpactContext(anchorPoint, anchorNormal, context.BallObject, context.Collision)
+                : new BallImpactContext(anchorPoint, anchorNormal, context.BallObject, context.HitCollider);
+        }
+
+        void CompleteAnchorArming()
+        {
+            if (m_State != LauncherState.AnchorArming && m_State != LauncherState.AnchorReady)
+                return;
+
+            if (m_ActiveProjectile != null
+                && m_ActiveProjectile.TryGetComponent(out TeleportBallVisualController visualController))
+            {
+                visualController.CompleteAnchorReady();
+            }
+
+            m_State = LauncherState.AnchorReady;
             SetAnchorHintVisible(true);
             RefreshAnchorHintUI();
-            return true;
         }
 
         void ConfirmAnchor()
@@ -425,9 +485,46 @@ namespace CIS5680VRGame.Balls
         void CancelActiveProjectileOnly()
         {
             if (m_ActiveProjectile != null)
-                Destroy(m_ActiveProjectile);
+            {
+                m_LaunchLockedUntil = Mathf.Max(
+                    m_LaunchLockedUntil,
+                    Time.time + Mathf.Max(0f, m_PostDisappearLaunchLockout));
+
+                if (m_ActiveProjectile.TryGetComponent(out TeleportBallVisualController visualController))
+                {
+                    ResolveProjectileDisappearPose(m_ActiveProjectile, out Vector3 effectPoint, out Vector3 effectNormal);
+                    visualController.BeginDisappear(false, effectPoint, effectNormal);
+                }
+                else
+                {
+                    BallFadeOut.Begin(m_ActiveProjectile, 0f, 0.38f);
+                }
+            }
 
             m_ActiveProjectile = null;
+        }
+
+        bool IsTeleportLaunchLocked()
+        {
+            return m_ActiveProjectile != null
+                || Time.time < m_LaunchLockedUntil
+                || m_State == LauncherState.ProjectileFlying
+                || m_State == LauncherState.AnchorArming
+                || m_State == LauncherState.AnchorReady;
+        }
+
+        void ResolveProjectileDisappearPose(GameObject projectile, out Vector3 effectPoint, out Vector3 effectNormal)
+        {
+            effectPoint = projectile != null ? projectile.transform.position : Vector3.zero;
+            effectNormal = Vector3.up;
+
+            if (m_AnchorContext.BallObject == projectile)
+            {
+                effectPoint = m_AnchorContext.HitPoint;
+                effectNormal = m_AnchorContext.HitNormal.sqrMagnitude > 0.0001f
+                    ? m_AnchorContext.HitNormal.normalized
+                    : Vector3.up;
+            }
         }
 
         bool BuildPreviewTrajectory(out TrajectoryHit hit)
@@ -607,10 +704,17 @@ namespace CIS5680VRGame.Balls
                 m_PreviewMarker.SetActive(visible && m_CurrentPreviewValid);
         }
 
-        void ApplyAnchorVisual(GameObject anchorObject)
+        void ApplyAnchorVisual(GameObject anchorObject, Vector3 hitPoint, Vector3 hitNormal, float anchorReadyTime, float anchorExpireTime)
         {
             if (anchorObject == null)
                 return;
+
+            TeleportBallVisualController visualController = anchorObject.GetComponent<TeleportBallVisualController>();
+            if (visualController != null)
+            {
+                visualController.EnterAnchorArming(hitPoint, hitNormal, anchorReadyTime, anchorExpireTime);
+                return;
+            }
 
             Renderer[] renderers = anchorObject.GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)

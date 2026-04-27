@@ -336,6 +336,8 @@ namespace CIS5680VRGame.Generation
         public int minGoalDistanceFromStart = 7;
         public int branchFreeStartCells = 3;
         public int preferredStraightStartCells = 3;
+        public int maxBranchlessMainPathCells = 6;
+        public float firstBranchAnchorRatio = 0.2f;
         public float startZoneRatio = 0.25f;
         public float midZoneRatio = 0.35f;
     }

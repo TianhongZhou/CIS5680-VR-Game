@@ -1,4 +1,5 @@
 using CIS5680VRGame.Balls;
+using CIS5680VRGame.UI;
 using TMPro;
 using Unity.XR.CoreUtils;
 using UnityEngine;
@@ -62,6 +63,7 @@ namespace CIS5680VRGame.Gameplay
             s_LockedMovementModeManager = null;
             Time.timeScale = 1f;
             AudioListener.pause = false;
+            TeleportViewEffectService.ClearHeldOverlay();
         }
 
         public static void LockGameplayInputForTransition(XROrigin playerRig = null, MovementModeManager movementModeManager = null)

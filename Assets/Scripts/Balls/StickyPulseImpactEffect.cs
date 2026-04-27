@@ -9,13 +9,22 @@ namespace CIS5680VRGame.Balls
 {
     public class StickyPulseImpactEffect : BallImpactEffect
     {
+        public static event Action<GameObject, Vector3, Vector3, Collider> AttachLockStarted;
+        public static event Action<GameObject, Vector3, Vector3, Collider> AttachLockCompleted;
         public static event Action<Vector3, float, Collider> PulseSpawned;
+        public static event Action<GameObject, Vector3, float, Collider> PulseSpawnedByBall;
 
         [SerializeField] PulseManager m_PulseManager;
         [SerializeField] float m_PulseRadius = 15f;
         [SerializeField] float m_PulseInterval = 8f;
         [SerializeField] int m_PulseCount = 3;
         [SerializeField] float m_StickSurfaceOffset = 0.02f;
+        [Header("Attachment Lock")]
+        [SerializeField, Min(0f)] float m_AttachLockDuration = 0.55f;
+        [SerializeField, Min(0f)] float m_AttachSettleOutwardOffset = 0.035f;
+        [SerializeField, Range(0f, 25f)] float m_AttachSettleWobbleDegrees = 7f;
+        [SerializeField, Min(0f)] float m_AttachSettleWobbleFrequency = 18f;
+        [Header("Lifetime")]
         [SerializeField] float m_DestroyDelayAfterLastPulse = 0.75f;
         [SerializeField] float m_FadeDurationAfterLastPulse = 0.55f;
         float m_BasePulseRadius;
@@ -33,6 +42,8 @@ namespace CIS5680VRGame.Balls
         Transform m_StuckAnchorTransform;
         Vector3 m_StuckLocalPosition;
         Quaternion m_StuckLocalRotation = Quaternion.identity;
+        bool m_IsAttachLocking;
+        float m_AttachLockT = 1f;
 
         void Awake()
         {
@@ -55,16 +66,17 @@ namespace CIS5680VRGame.Balls
                 StopCoroutine(m_PulseRoutine);
                 m_PulseRoutine = null;
             }
+
+            m_IsAttachLocking = false;
+            m_AttachLockT = 1f;
         }
 
         void LateUpdate()
         {
-            if (!m_HasStuck || m_StuckAnchorTransform == null)
+            if (!m_HasStuck)
                 return;
 
-            transform.SetPositionAndRotation(
-                m_StuckAnchorTransform.TransformPoint(m_StuckLocalPosition),
-                m_StuckAnchorTransform.rotation * m_StuckLocalRotation);
+            ApplyStuckPose();
         }
 
         public override void Apply(in BallImpactContext context)
@@ -78,7 +90,7 @@ namespace CIS5680VRGame.Balls
             m_HasStuck = true;
             m_StuckSurfaceCollider = context.HitCollider;
             StickToSurface(context);
-            m_PulseRoutine = StartCoroutine(EmitPulses());
+            m_PulseRoutine = StartCoroutine(LockThenEmitPulses());
         }
 
         void StickToSurface(in BallImpactContext context)
@@ -128,6 +140,33 @@ namespace CIS5680VRGame.Balls
             }
         }
 
+        IEnumerator LockThenEmitPulses()
+        {
+            m_IsAttachLocking = true;
+            m_AttachLockT = 0f;
+            AttachLockStarted?.Invoke(gameObject, ResolvePulseOriginFromCurrentAnchor(), ResolveSurfaceNormalFromCurrentAnchor(), m_StuckSurfaceCollider);
+
+            float duration = Mathf.Max(0f, m_AttachLockDuration);
+            if (duration > 0f)
+            {
+                float elapsed = 0f;
+                while (elapsed < duration)
+                {
+                    elapsed += Time.deltaTime;
+                    m_AttachLockT = Mathf.Clamp01(elapsed / duration);
+                    ApplyStuckPose();
+                    yield return null;
+                }
+            }
+
+            m_AttachLockT = 1f;
+            m_IsAttachLocking = false;
+            ApplyStuckPose();
+            AttachLockCompleted?.Invoke(gameObject, ResolvePulseOriginFromCurrentAnchor(), ResolveSurfaceNormalFromCurrentAnchor(), m_StuckSurfaceCollider);
+
+            yield return EmitPulses();
+        }
+
         IEnumerator EmitPulses()
         {
             int pulseCount = Mathf.Max(1, m_PulseCount);
@@ -155,14 +194,59 @@ namespace CIS5680VRGame.Balls
             if (m_PulseManager == null)
                 return;
 
-            Vector3 surfaceNormal = transform.up.sqrMagnitude < 0.0001f
-                ? Vector3.up
-                : transform.up.normalized;
-
-            Vector3 pulseOrigin = transform.position - surfaceNormal * m_StickSurfaceOffset;
+            Vector3 surfaceNormal = ResolveSurfaceNormalFromCurrentAnchor();
+            Vector3 pulseOrigin = ResolvePulseOriginFromCurrentAnchor();
             m_PulseManager.SpawnPulse(pulseOrigin, surfaceNormal, m_PulseRadius, m_StuckSurfaceCollider);
             PulseAudioService.PlayPulse(pulseOrigin);
             PulseSpawned?.Invoke(pulseOrigin, m_PulseRadius, m_StuckSurfaceCollider);
+            PulseSpawnedByBall?.Invoke(gameObject, pulseOrigin, m_PulseRadius, m_StuckSurfaceCollider);
+        }
+
+        void ApplyStuckPose()
+        {
+            Vector3 basePosition;
+            Quaternion baseRotation;
+            if (m_StuckAnchorTransform != null)
+            {
+                basePosition = m_StuckAnchorTransform.TransformPoint(m_StuckLocalPosition);
+                baseRotation = m_StuckAnchorTransform.rotation * m_StuckLocalRotation;
+            }
+            else
+            {
+                basePosition = m_StuckLocalPosition;
+                baseRotation = m_StuckLocalRotation;
+            }
+
+            if (!m_IsAttachLocking)
+            {
+                transform.SetPositionAndRotation(basePosition, baseRotation);
+                return;
+            }
+
+            float settle = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(m_AttachLockT));
+            float outwardOffset = Mathf.Lerp(m_AttachSettleOutwardOffset, 0f, settle);
+            float wobble = Mathf.Sin(m_AttachLockT * Mathf.Max(0f, m_AttachSettleWobbleFrequency)) * (1f - settle) * m_AttachSettleWobbleDegrees;
+            Vector3 normal = baseRotation * Vector3.up;
+            Vector3 tangent = baseRotation * Vector3.right;
+            Quaternion wobbleRotation = Quaternion.AngleAxis(wobble, tangent);
+            transform.SetPositionAndRotation(basePosition + normal * outwardOffset, wobbleRotation * baseRotation);
+        }
+
+        Vector3 ResolveSurfaceNormalFromCurrentAnchor()
+        {
+            Quaternion rotation = m_StuckAnchorTransform != null
+                ? m_StuckAnchorTransform.rotation * m_StuckLocalRotation
+                : m_StuckLocalRotation;
+            Vector3 surfaceNormal = rotation * Vector3.up;
+            return surfaceNormal.sqrMagnitude < 0.0001f ? Vector3.up : surfaceNormal.normalized;
+        }
+
+        Vector3 ResolvePulseOriginFromCurrentAnchor()
+        {
+            Vector3 basePosition = m_StuckAnchorTransform != null
+                ? m_StuckAnchorTransform.TransformPoint(m_StuckLocalPosition)
+                : m_StuckLocalPosition;
+            return basePosition - ResolveSurfaceNormalFromCurrentAnchor() * m_StickSurfaceOffset;
         }
 
         public void ApplyPersistentPulseRadiusBonusPercent(int bonusPercent)

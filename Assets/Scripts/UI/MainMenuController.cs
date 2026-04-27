@@ -43,6 +43,7 @@ namespace CIS5680VRGame.UI
         GameObject m_MenuRoot;
         GameObject m_ButtonColumn;
         GameObject m_TutorialPromptOverlay;
+        GameObject m_ShopLockedPromptOverlay;
         Button m_ContinueButton;
         TextMeshProUGUI m_GoldSummaryLabel;
         AudioSource m_BackgroundMusicSource;
@@ -158,6 +159,7 @@ namespace CIS5680VRGame.UI
             if (!createdNewRoot)
             {
                 SetTutorialPromptVisible(false);
+                SetShopLockedPromptVisible(false);
                 RefreshContinueButtonState();
                 RefreshGoldSummaryLabel();
                 return;
@@ -388,7 +390,9 @@ namespace CIS5680VRGame.UI
                 m_TutorialCancelButtonFontSize,
                 m_TutorialCancelButtonSize);
 
+            CreateShopLockedPrompt(contentArea.transform, fontAsset, resolvedMenuSize, contentAreaHeight);
             SetTutorialPromptVisible(false);
+            SetShopLockedPromptVisible(false);
             RefreshContinueButtonState();
             RefreshGoldSummaryLabel();
             ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
@@ -417,6 +421,7 @@ namespace CIS5680VRGame.UI
             m_MenuRoot = null;
             m_ButtonColumn = null;
             m_TutorialPromptOverlay = null;
+            m_ShopLockedPromptOverlay = null;
             m_ContinueButton = null;
             m_GoldSummaryLabel = null;
         }
@@ -565,6 +570,81 @@ namespace CIS5680VRGame.UI
                 Mathf.Min(preferredSize.y, maxHeight));
         }
 
+        void CreateShopLockedPrompt(Transform parent, TMP_FontAsset fontAsset, Vector2 resolvedMenuSize, float contentAreaHeight)
+        {
+            m_ShopLockedPromptOverlay = ModalMenuPauseUtility.CreateUIObject("ShopLockedPromptOverlay", parent);
+            RectTransform promptOverlayRect = m_ShopLockedPromptOverlay.GetComponent<RectTransform>();
+            promptOverlayRect.anchorMin = Vector2.zero;
+            promptOverlayRect.anchorMax = Vector2.one;
+            promptOverlayRect.offsetMin = Vector2.zero;
+            promptOverlayRect.offsetMax = Vector2.zero;
+            promptOverlayRect.anchoredPosition = Vector2.zero;
+
+            LayoutElement promptOverlayLayout = m_ShopLockedPromptOverlay.AddComponent<LayoutElement>();
+            promptOverlayLayout.ignoreLayout = true;
+
+            Image promptOverlayImage = m_ShopLockedPromptOverlay.AddComponent<Image>();
+            promptOverlayImage.color = new Color(0f, 0f, 0f, 0.6f);
+
+            GameObject promptFrame = ModalMenuPauseUtility.CreateUIObject("PromptFrame", m_ShopLockedPromptOverlay.transform);
+            RectTransform promptFrameRect = promptFrame.GetComponent<RectTransform>();
+            promptFrameRect.anchorMin = new Vector2(0.5f, 0.5f);
+            promptFrameRect.anchorMax = new Vector2(0.5f, 0.5f);
+            promptFrameRect.pivot = new Vector2(0.5f, 0.5f);
+            promptFrameRect.anchoredPosition = Vector2.zero;
+            promptFrameRect.sizeDelta = ResolveTutorialPromptSize(resolvedMenuSize, contentAreaHeight);
+
+            Image promptFrameImage = promptFrame.AddComponent<Image>();
+            promptFrameImage.color = new Color(0.02f, 0.03f, 0.05f, 0.96f);
+
+            Outline promptFrameOutline = promptFrame.AddComponent<Outline>();
+            promptFrameOutline.effectColor = new Color(0.98f, 0.74f, 0.22f, 0.42f);
+            promptFrameOutline.effectDistance = new Vector2(2f, -2f);
+
+            VerticalLayoutGroup promptLayout = promptFrame.AddComponent<VerticalLayoutGroup>();
+            promptLayout.spacing = 18f;
+            promptLayout.childAlignment = TextAnchor.MiddleCenter;
+            promptLayout.childControlWidth = true;
+            promptLayout.childControlHeight = true;
+            promptLayout.childForceExpandWidth = false;
+            promptLayout.childForceExpandHeight = false;
+            promptLayout.padding = new RectOffset(24, 24, 18, 18);
+
+            CreateLabel(
+                "PromptTitle",
+                promptFrame.transform,
+                "Shop Locked",
+                fontAsset,
+                32f,
+                FontStyles.Bold,
+                new Color(1f, 0.9f, 0.58f, 1f),
+                42f,
+                false,
+                true);
+
+            CreateLabel(
+                "PromptBody",
+                promptFrame.transform,
+                "Complete the tutorial before visiting the shop.",
+                fontAsset,
+                22f,
+                FontStyles.Normal,
+                new Color(0.78f, 0.88f, 0.96f, 1f),
+                70f,
+                true);
+
+            CreateButton(
+                "ShopLockedDismissButton",
+                promptFrame.transform,
+                "OK",
+                fontAsset,
+                new Color(0.62f, 0.42f, 0.2f, 0.96f),
+                CancelShopLockedPrompt,
+                UIButtonSoundStyle.Cancel,
+                24f,
+                new Vector2(240f, 60f));
+        }
+
         void ConfigurePanelTransform(RectTransform panelRect, Vector2 resolvedMenuSize)
         {
             if (panelRect == null)
@@ -593,9 +673,10 @@ namespace CIS5680VRGame.UI
             bool hasGoldSummary = panelTransform.Find("GoldSummary") != null;
             bool hasButtonColumn = contentAreaTransform != null && contentAreaTransform.Find("Buttons") != null;
             bool hasPromptOverlay = contentAreaTransform != null && contentAreaTransform.Find("TutorialPromptOverlay") != null;
+            bool hasShopLockedPromptOverlay = contentAreaTransform != null && contentAreaTransform.Find("ShopLockedPromptOverlay") != null;
             bool hasContinueButton = contentAreaTransform != null && contentAreaTransform.Find("Buttons/ContinueButton") != null;
             bool hasShopButton = contentAreaTransform != null && contentAreaTransform.Find("Buttons/ShopButton") != null;
-            return contentAreaTransform == null || !hasButtonColumn || !hasPromptOverlay || !hasContinueButton || !hasShopButton || !hasGoldSummary || hasLegacyButtons || hasLegacyPromptOverlay || hasLegacyPrompt;
+            return contentAreaTransform == null || !hasButtonColumn || !hasPromptOverlay || !hasShopLockedPromptOverlay || !hasContinueButton || !hasShopButton || !hasGoldSummary || hasLegacyButtons || hasLegacyPromptOverlay || hasLegacyPrompt;
         }
 
         void ResolveMenuSections()
@@ -615,6 +696,13 @@ namespace CIS5680VRGame.UI
                 Transform promptTransform = m_MenuRoot.transform.Find("Panel/ContentArea/TutorialPromptOverlay");
                 if (promptTransform != null)
                     m_TutorialPromptOverlay = promptTransform.gameObject;
+            }
+
+            if (m_ShopLockedPromptOverlay == null)
+            {
+                Transform promptTransform = m_MenuRoot.transform.Find("Panel/ContentArea/ShopLockedPromptOverlay");
+                if (promptTransform != null)
+                    m_ShopLockedPromptOverlay = promptTransform.gameObject;
             }
 
             if (m_ContinueButton == null)
@@ -641,6 +729,27 @@ namespace CIS5680VRGame.UI
 
             if (m_TutorialPromptOverlay != null)
                 m_TutorialPromptOverlay.SetActive(visible);
+
+            if (visible && m_ShopLockedPromptOverlay != null)
+                m_ShopLockedPromptOverlay.SetActive(false);
+
+            RectTransform panelRect = ResolvePanelRect();
+            if (m_MenuRoot != null && panelRect != null && m_MenuRoot.activeSelf)
+                ModalMenuPauseUtility.RefreshMenuLayout(m_MenuRoot, panelRect);
+        }
+
+        void SetShopLockedPromptVisible(bool visible)
+        {
+            ResolveMenuSections();
+
+            if (m_ButtonColumn != null)
+                m_ButtonColumn.SetActive(!visible);
+
+            if (visible && m_TutorialPromptOverlay != null)
+                m_TutorialPromptOverlay.SetActive(false);
+
+            if (m_ShopLockedPromptOverlay != null)
+                m_ShopLockedPromptOverlay.SetActive(visible);
 
             RectTransform panelRect = ResolvePanelRect();
             if (m_MenuRoot != null && panelRect != null && m_MenuRoot.activeSelf)
@@ -770,6 +879,16 @@ namespace CIS5680VRGame.UI
             SetTutorialPromptVisible(false);
         }
 
+        void ShowShopLockedPrompt()
+        {
+            SetShopLockedPromptVisible(true);
+        }
+
+        void CancelShopLockedPrompt()
+        {
+            SetShopLockedPromptVisible(false);
+        }
+
         void LoadTutorial()
         {
             Time.timeScale = 1f;
@@ -789,6 +908,12 @@ namespace CIS5680VRGame.UI
 
         void LoadShop()
         {
+            if (ProfileService.IsTutorialRunInProgress())
+            {
+                ShowShopLockedPrompt();
+                return;
+            }
+
             Time.timeScale = 1f;
             AudioListener.pause = false;
             SceneTransitionService.LoadScene(m_ShopSceneName, m_BackgroundMusicSource);

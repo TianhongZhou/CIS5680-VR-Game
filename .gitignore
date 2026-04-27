@@ -82,6 +82,11 @@ InitTestScene*.unity*
 !/README.md
 /Assets/Screenshots/
 /Assets/Screenshots.meta
+/Assets/Development.meta
+/Assets/Development/Screenshots/
+/Assets/Development/Screenshots.meta
+*.blend1
+*.blend1.meta
 
 # Unity Burst debug output
 *_BurstDebugInformation_DoNotShip/
