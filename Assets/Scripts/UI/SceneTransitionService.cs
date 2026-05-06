@@ -79,6 +79,8 @@ namespace CIS5680VRGame.UI
                 startMasterVolume: initialMasterVolume,
                 endMasterVolume: 0f);
 
+            EnemyChaseMusicService.BeginSceneTransitionReset();
+
             if (audioSourceToStop != null)
             {
                 audioSourceToStop.Stop();
@@ -93,6 +95,7 @@ namespace CIS5680VRGame.UI
             RefreshCanvasCamera();
             SetFadeAlpha(1f);
             AudioListener.volume = 0f;
+            EnemyChaseMusicService.BeginSceneTransitionReset();
 
             yield return FadeRoutine(
                 startAlpha: 1f,
@@ -101,6 +104,7 @@ namespace CIS5680VRGame.UI
                 startMasterVolume: 0f,
                 endMasterVolume: initialMasterVolume);
 
+            EnemyChaseMusicService.EndSceneTransitionReset();
             SetFadeAlpha(0f);
             AudioListener.volume = initialMasterVolume;
             ModalMenuPauseUtility.UnlockGameplayInputAfterTransition();

@@ -19,6 +19,7 @@ namespace CIS5680VRGame.Gameplay
         float m_CurrentMusicVelocity;
         float m_CurrentAmbientVelocity;
         float m_CurrentAmbientMultiplier = 1f;
+        bool m_SuppressForSceneTransition;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Bootstrap()
@@ -34,6 +35,30 @@ namespace CIS5680VRGame.Gameplay
             GameObject root = new("EnemyChaseMusicService");
             DontDestroyOnLoad(root);
             s_Instance = root.AddComponent<EnemyChaseMusicService>();
+        }
+
+        public static void BeginSceneTransitionReset()
+        {
+            if (s_Instance == null)
+            {
+                ApplyAmbientMultiplier(1f);
+                return;
+            }
+
+            s_Instance.m_SuppressForSceneTransition = true;
+            s_Instance.StopChaseMusicImmediately();
+        }
+
+        public static void EndSceneTransitionReset()
+        {
+            if (s_Instance == null)
+            {
+                ApplyAmbientMultiplier(1f);
+                return;
+            }
+
+            s_Instance.m_SuppressForSceneTransition = false;
+            s_Instance.ResetAmbientDuckImmediately();
         }
 
         void Awake()
@@ -62,7 +87,9 @@ namespace CIS5680VRGame.Gameplay
             EnsureAudioSource();
 
             bool canPlayChaseMusic = m_ChaseClip != null;
-            bool shouldPlayChaseMusic = canPlayChaseMusic && EnemyPatrolController.HasChasingEnemy();
+            bool shouldPlayChaseMusic = canPlayChaseMusic
+                && !m_SuppressForSceneTransition
+                && EnemyPatrolController.HasChasingEnemy();
 
             UpdateAmbientDuck(shouldPlayChaseMusic);
             UpdateMusicPlayback(shouldPlayChaseMusic);
@@ -100,11 +127,33 @@ namespace CIS5680VRGame.Gameplay
             ApplyAmbientMultiplier(m_CurrentAmbientMultiplier);
         }
 
-        void ApplyAmbientMultiplier(float multiplier)
+        static void ApplyAmbientMultiplier(float multiplier)
         {
             float clampedMultiplier = Mathf.Clamp01(multiplier);
             GoalBeaconAmbientAudio.SetExternalVolumeMultiplier(clampedMultiplier);
             TrapAmbientAudioService.SetExternalVolumeMultiplier(clampedMultiplier);
+        }
+
+        void StopChaseMusicImmediately()
+        {
+            EnsureAudioSource();
+
+            m_CurrentMusicVelocity = 0f;
+            if (m_AudioSource != null)
+            {
+                m_AudioSource.volume = 0f;
+                if (m_AudioSource.isPlaying)
+                    m_AudioSource.Stop();
+            }
+
+            ResetAmbientDuckImmediately();
+        }
+
+        void ResetAmbientDuckImmediately()
+        {
+            m_CurrentAmbientVelocity = 0f;
+            m_CurrentAmbientMultiplier = 1f;
+            ApplyAmbientMultiplier(1f);
         }
 
         void UpdateMusicPlayback(bool shouldPlayChaseMusic)

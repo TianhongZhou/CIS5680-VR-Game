@@ -112,6 +112,11 @@ public class MovementModeManager : MonoBehaviour
         ApplyMode(mode);
     }
 
+    public static void ResetSessionModeToNormalMove()
+    {
+        StoreSessionMode(MovementMode.NormalMove);
+    }
+
     public void LockMovement()
     {
         isMovementLocked = true;

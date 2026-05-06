@@ -22,7 +22,8 @@ namespace CIS5680VRGame.Gameplay
         public static readonly Vector3 WorldMenuLocalOffset = new(0f, -0.36f, 2f);
         public const float WorldMenuUnitsPerPixel = 0.0022f;
         const float k_MinWorldMenuDistance = 1.65f;
-        const float k_HighestComfortableWorldMenuY = -0.28f;
+        const float k_LowestComfortableWorldMenuY = -0.62f;
+        const float k_HighestComfortableWorldMenuY = 0.12f;
         const float k_MinStableMenuYawSqrMagnitude = 0.16f;
 
         static bool s_IsPausedForMenu;
@@ -324,9 +325,7 @@ namespace CIS5680VRGame.Gameplay
             if (localOffset == Vector3.zero)
                 localOffset = WorldMenuLocalOffset;
 
-            if (localOffset.y > k_HighestComfortableWorldMenuY)
-                localOffset.y = WorldMenuLocalOffset.y;
-
+            localOffset.y = Mathf.Clamp(localOffset.y, k_LowestComfortableWorldMenuY, k_HighestComfortableWorldMenuY);
             localOffset.z = Mathf.Max(localOffset.z, k_MinWorldMenuDistance);
             return localOffset;
         }
