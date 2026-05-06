@@ -33,6 +33,7 @@ namespace CIS5680VRGame.Gameplay
         Collider m_Trigger;
         GameObject m_MenuRoot;
         TutorialLevelController m_TutorialLevelController;
+        MazeExitGateVisualController m_ExitVisualController;
 
         public bool HasCompleted { get; private set; }
 
@@ -50,6 +51,9 @@ namespace CIS5680VRGame.Gameplay
             if (m_TargetRenderers == null || m_TargetRenderers.Length == 0)
                 m_TargetRenderers = GetComponentsInChildren<Renderer>(true);
 
+            if (m_ExitVisualController == null)
+                m_ExitVisualController = GetComponentInChildren<MazeExitGateVisualController>(true);
+
             m_TutorialLevelController = FindObjectOfType<TutorialLevelController>();
             m_PropertyBlock = new MaterialPropertyBlock();
             GoalBeaconAmbientAudio.EnsureAttached(gameObject);
@@ -66,6 +70,8 @@ namespace CIS5680VRGame.Gameplay
 
             m_TutorialLevelController?.NotifyTutorialGoalReached();
             ProfileService.MarkTutorialCompletedForShopTutorial(m_ShopTutorialGoldGrant);
+            m_ExitVisualController?.PlayExitActivation();
+            m_ExitVisualController?.SetCompletedState(true);
             ApplyCompletedVisualState();
             PulseAudioService.PlayLevelComplete(0.94f);
             ModalMenuPauseUtility.PauseGameplayForMenu(m_PlayerRig, m_MovementModeManager);

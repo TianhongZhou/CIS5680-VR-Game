@@ -9,11 +9,11 @@ public class ArmSwingMoveProvider : DynamicMoveProvider
     [Header("Arm Swing Detection")]
     [SerializeField]
     [Min(0f)]
-    private float activationSwingSpeed = 0.12f;
+    private float activationSwingSpeed = 0.14f;
 
     [SerializeField]
     [Min(0.01f)]
-    private float maxInputSwingSpeed = 0.55f;
+    private float maxInputSwingSpeed = 0.6f;
 
     [SerializeField]
     [Min(0f)]
@@ -21,15 +21,15 @@ public class ArmSwingMoveProvider : DynamicMoveProvider
 
     [SerializeField]
     [Min(0f)]
-    private float supportSwingSpeed = 0.14f;
+    private float supportSwingSpeed = 0.1f;
 
     [SerializeField]
     [Min(0.01f)]
-    private float supportTimingWindow = 0.2f;
+    private float supportTimingWindow = 0.25f;
 
     [SerializeField]
     [Min(0f)]
-    private float turnSuppressionDegreesPerSecond = 35f;
+    private float turnSuppressionDegreesPerSecond = 50f;
 
     [SerializeField]
     [Min(0f)]
@@ -38,7 +38,7 @@ public class ArmSwingMoveProvider : DynamicMoveProvider
     [Header("Movement Defaults")]
     [SerializeField]
     [Min(0f)]
-    private float defaultMoveSpeed = 1.75f;
+    private float defaultMoveSpeed = 3f;
 
     private Vector3 previousLeftLocalPosition;
     private Vector3 previousRightLocalPosition;

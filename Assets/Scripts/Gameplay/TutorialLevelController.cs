@@ -1,4 +1,5 @@
 using CIS5680VRGame.Balls;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
@@ -287,16 +288,16 @@ namespace CIS5680VRGame.Gameplay
         {
             m_HasUnlockedNormalEnergyCosts = false;
 
-            SetObjectActive("Step01_Beacon", false);
-            SetObjectActive("Step02_Beacon", false);
-            SetObjectActive("Step03_Beacon", false);
+            SetObjectActive("Step01_Beacon", false, immediateMarker: true);
+            SetObjectActive("Step02_Beacon", false, immediateMarker: true);
+            SetObjectActive("Step03_Beacon", false, immediateMarker: true);
             SetObjectActive("Step03_SonarTarget", false);
-            SetObjectActive("Step04_Beacon", false);
+            SetObjectActive("Step04_Beacon", false, immediateMarker: true);
             SetObjectActive("Step04_TeleportBlocker", false);
-            SetObjectActive("Step05_Beacon", false);
-            SetObjectActive("Step06_Beacon", false);
-            SetObjectActive("Step07_Beacon", false);
-            SetObjectActive("Step08_Beacon", false);
+            SetObjectActive("Step05_Beacon", false, immediateMarker: true);
+            SetObjectActive("Step06_Beacon", false, immediateMarker: true);
+            SetObjectActive("Step07_Beacon", false, immediateMarker: true);
+            SetObjectActive("Step08_Beacon", false, immediateMarker: true);
             SetObjectActive("TutorialEnemyScout", false);
             SetObjectActive(TutorialGoalScanBlocker, true);
 
@@ -616,13 +617,37 @@ namespace CIS5680VRGame.Gameplay
             return label;
         }
 
-        void SetObjectActive(string objectName, bool active)
+        void SetObjectActive(string objectName, bool active, bool immediateMarker = false)
         {
             if (!m_TutorialObjects.TryGetValue(objectName, out GameObject targetObject))
                 return;
 
-            if (targetObject != null)
-                targetObject.SetActive(active);
+            if (targetObject == null)
+                return;
+
+            if (TrySetTutorialWaypointActive(objectName, targetObject, active, immediateMarker))
+                return;
+
+            targetObject.SetActive(active);
+        }
+
+        bool TrySetTutorialWaypointActive(string objectName, GameObject targetObject, bool active, bool immediateMarker)
+        {
+            if (!IsTutorialWaypointBeaconName(objectName))
+                return false;
+
+            TutorialWaypointMarkerVisual markerVisual = targetObject.GetComponent<TutorialWaypointMarkerVisual>();
+            if (markerVisual == null)
+                markerVisual = targetObject.AddComponent<TutorialWaypointMarkerVisual>();
+
+            markerVisual.SetVisible(active, immediateMarker);
+            return true;
+        }
+
+        static bool IsTutorialWaypointBeaconName(string objectName)
+        {
+            return objectName.StartsWith("Step", StringComparison.Ordinal)
+                && objectName.EndsWith("_Beacon", StringComparison.Ordinal);
         }
 
         void ActivateTutorialEnemyScout()
@@ -743,10 +768,6 @@ namespace CIS5680VRGame.Gameplay
         {
             if (m_TutorialGoal == null)
                 return;
-
-            LevelGoalTrigger locatorGoal = m_TutorialGoal.GetComponent<LevelGoalTrigger>();
-            if (locatorGoal != null)
-                locatorGoal.enabled = false;
 
             TutorialCompletionGoal tutorialGoal = m_TutorialGoal.GetComponent<TutorialCompletionGoal>();
             if (tutorialGoal != null)

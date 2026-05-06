@@ -1514,7 +1514,7 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   m_Mediator: {fileID: 0}
   m_TransformationPriority: 0
-  m_MoveSpeed: 1.75
+  m_MoveSpeed: 3
   m_InAirControlModifier: 0.5
   m_EnableStrafe: 0
   m_EnableFly: 0
@@ -1553,14 +1553,14 @@ MonoBehaviour:
   m_RightControllerTransform: {fileID: 1046817613}
   m_LeftHandMovementDirection: 0
   m_RightHandMovementDirection: 0
-  activationSwingSpeed: 0.22
-  maxInputSwingSpeed: 0.85
-  inputSmoothing: 5.5
-  supportSwingSpeed: 0.16
-  supportTimingWindow: 0.15
-  turnSuppressionDegreesPerSecond: 35
+  activationSwingSpeed: 0.14
+  maxInputSwingSpeed: 0.6
+  inputSmoothing: 8
+  supportSwingSpeed: 0.1
+  supportTimingWindow: 0.25
+  turnSuppressionDegreesPerSecond: 50
   turnSuppressionSmoothing: 12
-  defaultMoveSpeed: 1.75
+  defaultMoveSpeed: 3
 --- !u!1 &107177634
 GameObject:
   m_ObjectHideFlags: 0

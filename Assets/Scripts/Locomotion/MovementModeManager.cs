@@ -31,6 +31,15 @@ public class MovementModeManager : MonoBehaviour
     private MovementMode currentMode = MovementMode.NormalMove;
     private MovementMode lastUnlockedMode = MovementMode.NormalMove;
     private bool isMovementLocked;
+    private static bool s_HasSessionMode;
+    private static MovementMode s_SessionMode;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetSessionMode()
+    {
+        s_HasSessionMode = false;
+        s_SessionMode = MovementMode.NormalMove;
+    }
 
     private void Reset()
     {
@@ -51,8 +60,10 @@ public class MovementModeManager : MonoBehaviour
     {
         AutoAssignManagedObjects();
 
-        currentMode = defaultMode;
-        lastUnlockedMode = defaultMode;
+        MovementMode startupMode = ResolveStartupMode();
+        currentMode = startupMode;
+        lastUnlockedMode = startupMode;
+        StoreSessionMode(startupMode);
 
         if (lockMovementOnStart)
         {
@@ -62,7 +73,7 @@ public class MovementModeManager : MonoBehaviour
 
         if (applyDefaultModeOnStart)
         {
-            ApplyMode(defaultMode);
+            ApplyMode(startupMode);
         }
     }
 
@@ -91,6 +102,7 @@ public class MovementModeManager : MonoBehaviour
     {
         currentMode = mode;
         lastUnlockedMode = mode;
+        StoreSessionMode(mode);
 
         if (isMovementLocked)
         {
@@ -110,6 +122,17 @@ public class MovementModeManager : MonoBehaviour
     {
         isMovementLocked = false;
         ApplyMode(lastUnlockedMode);
+    }
+
+    private MovementMode ResolveStartupMode()
+    {
+        return s_HasSessionMode ? s_SessionMode : defaultMode;
+    }
+
+    private static void StoreSessionMode(MovementMode mode)
+    {
+        s_SessionMode = mode;
+        s_HasSessionMode = true;
     }
 
     private void ApplyMode(MovementMode mode)

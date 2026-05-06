@@ -99,7 +99,7 @@ namespace CIS5680VRGame.Gameplay
 
         void OnTriggerEnter(Collider other)
         {
-            if (HasCompleted || !CanUse(other) || IsOverriddenByTutorialGoal())
+            if (HasCompleted || !CanUse(other))
                 return;
 
             HasCompleted = true;
@@ -182,12 +182,6 @@ namespace CIS5680VRGame.Gameplay
         {
             if (m_LogCompletion)
                 Debug.Log("Maze goal reached.", this);
-        }
-
-        bool IsOverriddenByTutorialGoal()
-        {
-            TutorialCompletionGoal tutorialGoal = GetComponent<TutorialCompletionGoal>();
-            return tutorialGoal != null && tutorialGoal.enabled;
         }
 
         bool CanUse(Collider other)

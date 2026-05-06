@@ -5,7 +5,6 @@ using UnityEngine;
 namespace CIS5680VRGame.Gameplay
 {
     [DisallowMultipleComponent]
-    [RequireComponent(typeof(LevelGoalTrigger))]
     public sealed class MazeExitGateVisualController : MonoBehaviour
     {
         enum LightRole
@@ -46,6 +45,7 @@ namespace CIS5680VRGame.Gameplay
         float m_PhaseOffset;
         float m_PulseFlashUntil;
         float m_ExitActivationUntil;
+        bool m_CompletedOverride;
 
         void Awake()
         {
@@ -147,6 +147,12 @@ namespace CIS5680VRGame.Gameplay
             ApplyVisualState();
         }
 
+        public void SetCompletedState(bool completed)
+        {
+            m_CompletedOverride = completed;
+            ApplyVisualState();
+        }
+
         void UpdateMovingScanLine(float now)
         {
             if (m_MovingScanLine == null || m_ScanLineAmplitude <= 0f)
@@ -167,7 +173,8 @@ namespace CIS5680VRGame.Gameplay
             float breath = Mathf.SmoothStep(0f, 1f, breathWave);
             float flash = ResolveFlash01(now);
             float activation = ResolveExitActivation01(now);
-            float completed = m_GoalTrigger != null && m_GoalTrigger.HasCompleted && m_CompletedGlowBoost > 0f ? 1f : 0f;
+            float completed = (m_CompletedOverride || (m_GoalTrigger != null && m_GoalTrigger.HasCompleted))
+                && m_CompletedGlowBoost > 0f ? 1f : 0f;
 
             for (int i = 0; i < m_RendererStates.Count; i++)
             {
